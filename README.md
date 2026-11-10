@@ -1,127 +1,104 @@
 <div align="center">
 
-<img src="docs/assets/autofluent-hero.svg" width="100%" alt="AutoFluent ALD 腔体原生面通量分析工具原创技术主视觉（非 Fluent 仿真云图）" />
+<img src="docs/assets/autofluent-hero.svg" width="100%" alt="AutoFluent — ALD flow analysis workstation" />
 
 <br />
 
-### Turn simulation data into traceable engineering evidence.
+### Fluent saved solutions. Clearer flow insight.
 
-**读取 Fluent 保存解，识别晶圆与挡板，核验原生通量，形成可分享的分析报告。**
+面向 ALD 反应腔的 Fluent 保存解分析工作台。  
+从原生面通量到晶圆片间、挡板、守恒与方案对比，让数据直接服务下一轮结构优化。
 
 <p>
   <a href="AutoFluent_V2.10.5_Windows_x64.zip"><strong>Download for Windows</strong></a>
-  &nbsp; · &nbsp;
-  <a href="docs/GETTING_STARTED.md"><strong>快速开始</strong></a>
-  &nbsp; · &nbsp;
-  <a href="worker/"><strong>Source code</strong></a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="docs/GETTING_STARTED.md">Quick start</a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="cmd/autofluent/">Source code</a>
 </p>
 
-<sub>V2.10.5 · Windows x64 · ANSYS Fluent H5 · Go + Python · Stage release</sub>
+<sub>Windows x64 &nbsp; / &nbsp; ANSYS Fluent H5 &nbsp; / &nbsp; Go + Python &nbsp; / &nbsp; V2.10.5</sub>
 
 </div>
 
 ---
 
-## One workflow. Defensible results.
+## From simulation to insight
 
-AutoFluent 是面向 **ALD 反应腔 CFD 分析**的 Windows 原生辅助工具。它从已有的 Fluent `.cas.h5` / `.dat.h5` 保存解出发，尽量把分散的文件配对、几何识别、`SV_FLUX` 原生通量统计、守恒检查、模型对比和报告导出组织在一条工作流中。
+AutoFluent 从已有的 `.cas.h5` 与 `.dat.h5` 文件读取 Fluent 原生数据，将**文件核对、几何识别、质量流量积分、结果验证和报告生成**整合为一套桌面工作流。
 
-**离线分析不需要启动 Workbench，也不重新求解。** 如果晶圆或挡板几何存在歧义，已校验的端口流量和压降应当保留；不能确认的片间通道、孔数和 CV 不应被猜测填充。
-
-```text
-SELECT             IDENTIFY             MEASURE            VERIFY             REPORT
-选择 Case/Data  →   核对几何和分区    →   积分原生 SV_FLUX  →   守恒与可信度检查  →   独立 HTML 报告
-```
-
-## What it does
-
-| | 功能 | 核心价值 |
-|:--:|---|---|
-| **01** | **Read saved solutions** · 保存解读取 | Case/Data 配对、H5 元数据预检、原生通量来源追溯，支持对部分指标独立出数 |
-| **02** | **Identify flow regions** · 几何识别 | 按晶圆壁面片、厚度、阵列与排归属识别片间通道；支持普通双排与交错双排的配置辅助分析 |
-| **03** | **Quantify & verify** · 物理核验 | 端口正反向/净流量、质量守恒、可用压降，以及通过几何校验后的片间与挡板统计 |
-| **04** | **Compare & explain** · 对比报告 | 区分同口径指标与不可直接比较的结果，导出自包含 HTML，并保留详细数据 |
-| **05** | **Control when authorized** · 在线操作 | 可选择连接已有 Workbench/Fluent；设置发布与求解为独立、受用户确认约束的工作流 |
-
-### Two workflows, one application
-
-| **Offline analysis** · 推荐默认流程 | **Connected control** · 按需连接 |
-|---|---|
-| 读取已保存的 `.cas.h5` 和 `.dat.h5`，不需要 Workbench 端口。 | 连接**已打开的** Workbench 工程与 Fluent 容器。 |
-| 对几何、通量、守恒和报告进行分阶段核验；不能确认时显示失败原因。 | 在明确授权和状态检查后进行工况预览/发布、任务监测与求解控制。 |
-| **不初始化、不迭代、不改动原始保存解。** | **不自动新建工程、不擅自启动迭代。** |
-
-## Get started
-
-<details open>
-<summary><strong>Five steps to your first flow review</strong></summary>
-
-1. 下载 [**Windows x64 完整 ZIP**](AutoFluent_V2.10.5_Windows_x64.zip) 并全部解压。
-2. 运行解压目录中的 `AutoFluent.exe`，保留 `worker/` 等随附文件。
-3. 打开「**保存解分析**」，选择 `.cas.h5` 或 `.dat.h5`，确认实际匹配的 Case/Data 文件。
-4. 查看几何预检与模块状态；识别有歧义时，在相同离线入口提供模型配置再尝试计算。
-5. 查看端口、片间、挡板和压力的**实际可用结果**，导出 HTML；需要比较时核对共同截面与分区口径。
-
-</details>
-
-[**完整使用指南 →**](docs/GETTING_STARTED.md)
-
-## Why the numbers can be trusted — or withheld
-
-- **Native values first.** 质量流量优先使用保存解中的原生 `SV_FLUX`，不以速度插值冒充守恒面通量。
-- **Geometry before channels.** 先识别晶圆实体，再分排、生成同排通道；几何不能确认时不假设通道数。
-- **One face, one partition.** 截面网格面只能归属一个主分区；中央/外围/端部流量不重复加总。
-- **Partial success is meaningful.** 晶圆配对失败不应抹去已通过的端口、守恒和压降结果。
-- **Comparable means comparable.** 不同模型必须核对截面、方向、分界、通道对应及工况，不能直接用不同口径百分比判优。
-
-## Download & resources
-
-| 资源 | 链接 |
-|---|---|
-| **Windows 完整发布包** | [AutoFluent V2.10.5 ZIP](AutoFluent_V2.10.5_Windows_x64.zip) |
-| **解压后的 Windows EXE** | [AutoFluent.exe](AutoFluent.exe) |
-| **Go + Python 源码** | [Go UI](cmd/autofluent/) · [Python Worker](worker/) |
-| **快速入门** | [Getting started](docs/GETTING_STARTED.md) |
-| **原版测试与变更记录** | [QA & changes](docs/) · [Test logs](reports/) |
-| **完整性清单** | [SHA256SUMS](SHA256SUMS.txt) |
-
-<details>
-<summary><strong>Architecture · 技术架构</strong></summary>
-
-```text
-AutoFluent.exe                Go · Native Windows UI
-       │
-       ├── Offline Analyzer   Python · Fluent HDF5 Case/Data
-       │       │
-       │       ├── Geometry / native face flux
-       │       ├── Port / wafer / baffle / pressure checks
-       │       ├── Structured JSON and CSV
-       │       └── Self-contained HTML report
-       │
-       └── Connected Worker   Optional existing Workbench / Fluent
-               │
-               └── User-reviewed settings & solver tasks
-```
-
-</details>
-
-<details>
-<summary><strong>Scope & validation · 适用范围及验收状态</strong></summary>
-
-当前公开包为 **V2.10.5 阶段修复版**。发布包记录的 Python **233/233** 项测试、Go 测试和 Windows x64 构建通过，主要是合成数据与历史回归。
-
-**尚未完成现场验收**：6 寸 2.0 FFF（26,011,622 面）的完整晶圆与挡板识别、384 片/380 通道/210 孔的逐项核对、Windows 32 GB 内存峰值及全部原生界面交互。测试通过不代表真实模型已完整算通。
-
-</details>
-
----
+离线分析直接使用保存解，无需连接 Workbench，也不会重新初始化或迭代计算。对可以确认的结果独立输出；遇到复杂几何时，支持通过模型配置指定搜索范围和截面分区，避免用未经确认的数量替代真实测量。
 
 <div align="center">
 
-<sub>Illustration is an original schematic, not a Fluent screenshot. No model outputs are fabricated for presentation.</sub>
-
-<br />
-
-<sub>本仓库暂未附开源许可证。完整源码可阅读，但不代表已授予第三方复用或再分发许可。相关开发工具：<a href="https://github.com/1463503175-pixel/AutoMesh">AutoMesh</a>。</sub>
+<img src="docs/assets/autofluent-pipeline.svg" width="100%" alt="Select, identify, measure, verify and compare workflow" />
 
 </div>
+
+## Built for flow analysis
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3>01 / Native H5 analysis</h3>
+<p>直接分析 Fluent Case/Data 保存解，核验文件对应关系、面索引与原生 <code>SV_FLUX</code> 数据。分别统计入口、出口的正向、反向及净质量流量。</p>
+</td>
+<td width="50%" valign="top">
+<h3>02 / Wafer &amp; baffle mapping</h3>
+<p>从晶圆壁面片、厚度和重复阵列识别通道；支持普通双排与交错双排的配置辅助分析。挡板孔与截面积分独立校验。</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<h3>03 / Physical verification</h3>
+<p>核对质量守恒、片间流量分配、通道 CV、旁路及可用压降。以不同模块的校验状态区分完整结果和部分结果。</p>
+</td>
+<td valign="top">
+<h3>04 / Reports &amp; comparison</h3>
+<p>输出结构化 JSON、CSV 与离线 HTML 报告；保留逐通道位置、流量证据及异常诊断。方案对比区分可比指标与不同统计口径。</p>
+</td>
+</tr>
+</table>
+
+## Get started
+
+**01. Download** — 下载 [Windows x64 完整程序包](AutoFluent_V2.10.5_Windows_x64.zip) 并全部解压。  
+**02. Open** — 运行 `AutoFluent-目录浏览版.exe`，在「保存解分析」中选择 `.cas.h5` 或 `.dat.h5`。  
+**03. Analyze** — 确认文件配对及几何预检，执行离线分析，查看统计结果与 HTML 报告。
+
+[完整使用指南](docs/GETTING_STARTED.md) · [查看配置示例](templates/) · [查看分析报告示例](examples/)
+
+## Two complementary modes
+
+| Offline analysis | Connected workflow |
+|---|---|
+| **默认模式**。复用已有保存解，进行原生通量积分、晶圆与挡板分析、口径核验及报告导出。 | **按需使用**。连接已有 Workbench / Fluent 会话，进行受控的工况预览、发布与求解任务管理。 |
+| 不依赖在线求解器，不修改保存解。 | 设置修改与迭代仅在明确确认后执行。 |
+
+## Explore
+
+| | |
+|---|---|
+| **Download** | [V2.10.5 Windows x64](AutoFluent_V2.10.5_Windows_x64.zip) |
+| **Documentation** | [Quick start](docs/GETTING_STARTED.md) · [Validation &amp; changelog](docs/V2.10.5_专项修改与验证.md) |
+| **Source** | [Go desktop](cmd/autofluent/) · [Python analysis worker](worker/) |
+| **Examples** | [Configuration templates](templates/) · [Report samples](examples/) |
+| **Related project** | [AutoMesh — mesh quality workstation](https://github.com/1463503175-pixel/AutoMesh) |
+
+<details>
+<summary><strong>Architecture</strong></summary>
+
+```text
+AutoFluent / Windows native UI (Go)
+      ├── Offline analysis
+      │     ├── Case + Data pairing / geometry precheck
+      │     ├── Native H5 fields + SV_FLUX
+      │     ├── Ports / wafer channels / baffles / pressure
+      │     └── JSON + CSV + standalone HTML
+      └── Connected tasks
+            └── Existing Workbench / Fluent session
+```
+
+当前仓库公开的是 V2.10.5 版本；真实 FFF 大模型的完整晶圆、挡板与内存测试仍以 [专项验收记录](docs/V2.10.5_专项修改与验证.md) 为准。
+
+</details>
