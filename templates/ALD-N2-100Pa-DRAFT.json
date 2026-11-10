@@ -1,0 +1,16 @@
+{
+  "schema": "autofluent.conditions.v1",
+  "template_id": "ALD-N2-100Pa-DRAFT-NOT-FOR-PUBLISH",
+  "verified_with_real_case": false,
+  "notes": "历史工况参考，缺各入口质量流量、材料、热壁面设置。禁止将此示例作为完整统一工况发布；先从真实基准 Case 提取。",
+  "fields": [
+    {"path":"setup.general.solver.type","value":"pressure-based","required":true},
+    {"path":"setup.general.solver.time","value":"steady","required":true},
+    {"path":"setup.general.operating_conditions.operating_pressure","value":100.0,"required":true},
+    {"path":"setup.models.viscous.model","value":"laminar","required":true},
+    {"path":"setup.models.energy.enabled","value":true,"required":true},
+    {"path":"solution.methods.p_v_coupling.flow_scheme","value":"Coupled","required":true}
+  ],
+  "zones": [],
+  "fluid_zones": []
+}

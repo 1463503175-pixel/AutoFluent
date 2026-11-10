@@ -1,0 +1,2708 @@
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,14 @@
++# AutoFluent V2.10.4 — 晶圆、挡板及报告恢复专项版
++
++**这是可运行的阶段版本，不代表真实 6 寸 2.0 几何已经全部算通。** 本版重点修复同 X 面片分组诊断、真实板孔开口确认、计算和 HTML 文件发布分离，以及 Windows 界面「仅重试 HTML 导出」。
++
++- Windows：完整解压后运行 `AutoFluent.exe`。离线 H5 分析无需连接 Workbench；报告失败可使用保留的 JSON 重新导出，不重新读取 Fluent 大型保存解。
++- 计算正确性：无法确认晶圆或孔洞时，保留端口和可用压降数据，标出第一失败阶段，不伪造通道数、孔数或 CV。
++- 回归：Python **222/222**，Go 测试、Go Vet 和 Windows GUI 交叉编译通过。真实 26M 面 FFF 的完整晶圆、挡板和 Windows 32 GB 峰值待用户机器验证。
++- [专项修改和验收详情](docs/V2.10.4_晶圆挡板报告发布专项验收.md)。
++
++---
++
+ # AutoFluent V2.10.3 — 晶圆配对与部分结果专项修复
+ 
+ **非真实 2.0 模型最终验收版。** 这是在 V2.10.2 唯一主线上针对性升级的原生 Windows x64 程序。
+--- a/START_HERE.txt
++++ b/START_HERE.txt
+@@ -1,3 +1,7 @@
++AutoFluent V2.10.4 Windows x64：请先解压全部文件再运行 AutoFluent.exe。
++本版新增晶圆失败诊断、真实挡板开孔验证、计算结果和 HTML 发布分离及「仅重试 HTML 导出」。
++真实 FFF 大型模型仍需现场验收。
++
+ AutoFluent V2.10.3（晶圆识别与部分结果专项修复，未通过真实 2.0 验收）
+ 
+ AutoFluent V2.10.2（针对性整改检查点，非全部十阶段验收版）
+--- a/cmd/autofluent/app_core.go
++++ b/cmd/autofluent/app_core.go
+@@ -18,7 +18,7 @@
+ 	"time"
+ )
+ 
+-const Version = "2.10.1-unified-template-segmented-h5"
++const Version = "2.10.4-geometry-baffle-export"
+ 
+ // isApprovedReportPath allows only an existing AutoFluent-generated HTML
+ // under one of the three report stores. Rel checks path components rather than
+@@ -51,6 +51,64 @@
+ 		}
+ 	}
+ 	return false
++}
++
++// JSON recovery input must stay inside the generated native_reports folder.
++// Do not allow arbitrary local JSON to be used as an executable report source.
++func isApprovedAnalysisJSON(dataDir, requested string) bool {
++	if strings.TrimSpace(requested) == "" || !strings.EqualFold(filepath.Ext(requested), ".json") {
++		return false
++	}
++	info, err := os.Stat(requested)
++	if err != nil || info.IsDir() {
++		return false
++	}
++	actual, err := filepath.EvalSymlinks(requested)
++	if err != nil {
++		return false
++	}
++	actual, err = filepath.Abs(actual)
++	if err != nil {
++		return false
++	}
++	folder, err := filepath.EvalSymlinks(filepath.Join(dataDir, "native_reports"))
++	if err != nil {
++		return false
++	}
++	relative, err := filepath.Rel(folder, actual)
++	return err == nil && relative != "." && relative != ".." && !filepath.IsAbs(relative) && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))
++}
++
++// HTML can be recreated from a computed JSON snapshot without rereading a
++// 26-million-face saved solution. Failures never change physical result status.
++func (a *App) rerenderNativeJSON(ctx context.Context, source string) (map[string]any, error) {
++	if !isApprovedAnalysisJSON(a.dataDir, source) {
++		return nil, errors.New("Only a saved native_report JSON may be re-rendered")
++	}
++	python, err := a.h5PythonCommand()
++	if err != nil {
++		return nil, err
++	}
++	folder := filepath.Join(a.dataDir, "native_reports")
++	args := append(append([]string{}, python[1:]...), filepath.Join(a.base, "worker", "af_render_saved.py"),
++		"--json", source, "--output-dir", folder)
++	cmd := exec.CommandContext(ctx, python[0], args...)
++	configureChildProcess(cmd)
++	cmd.Dir = a.base
++	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8")
++	output, execErr := cmd.CombinedOutput()
++	var reply map[string]any
++	if err := json.Unmarshal(bytes.TrimSpace(output), &reply); err != nil {
++		return nil, fmt.Errorf("HTML re-export returned no JSON: %v; %s", execErr, trim(string(output), 400))
++	}
++	if execErr != nil {
++		return reply, fmt.Errorf("HTML re-export failed: %v", reply["reason"])
++	}
++	html, _ := reply["html_file"].(string)
++	if !isApprovedReportPath(a.dataDir, html) {
++		return reply, errors.New("Re-exported HTML path was not approved")
++	}
++	return reply, nil
+ }
+ 
+ type App struct {
+@@ -525,6 +583,67 @@
+ 	return result, nil
+ }
+ 
++// Case-only geometry precheck: reads actual mesh wall geometry and never starts
++// Workbench or Fluent. A blocked wafer pairing is a readable diagnostic result,
++// not evidence that the Case is invalid or the saved solution was corrupted.
++func (a *App) geometryPrecheckH5(ctx context.Context, selected, configPath, progressPath string) (map[string]any, error) {
++	command, err := a.h5PythonCommand()
++	if err != nil {
++		return nil, err
++	}
++	args := append(append([]string{}, command[1:]...),
++		filepath.Join(a.base, "worker", "af_h5_offline.py"),
++		"--file", selected, "--geometry-check", "--output-dir", filepath.Join(a.dataDir, "geometry_prechecks"))
++	if configPath != "" {
++		args = append(args, "--config", configPath)
++	}
++	cmd := exec.CommandContext(ctx, command[0], args...)
++	configureChildProcess(cmd)
++	cmd.Dir = a.base
++	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8")
++	if progressPath != "" {
++		cmd.Env = append(cmd.Env, "AUTOFLUENT_PROGRESS_FILE="+progressPath)
++	}
++	out, runErr := cmd.CombinedOutput()
++	var result map[string]any
++	if jsonErr := json.Unmarshal(bytes.TrimSpace(out), &result); jsonErr != nil {
++		return nil, fmt.Errorf("几何预检未返回有效 JSON: %v; %s", runErr, trim(string(out), 700))
++	}
++	if runErr != nil {
++		return result, fmt.Errorf("几何预检执行错误: %v", runErr)
++	}
++	return result, nil
++}
++
++// Real common-cut comparison always reruns each saved CFF snapshot using
++// a shared explicit physical geometry configuration; no cached percentages.
++func (a *App) recomputeCommonCut(ctx context.Context, before, after, configPath, progressPath string) (map[string]any, error) {
++	command, err := a.h5PythonCommand()
++	if err != nil {
++		return nil, err
++	}
++	args := append(append([]string{}, command[1:]...),
++		filepath.Join(a.base, "worker", "af_common_cut_compare.py"),
++		"--before", before, "--after", after, "--config", configPath,
++		"--output-dir", filepath.Join(a.dataDir, "comparisons"))
++	cmd := exec.CommandContext(ctx, command[0], args...)
++	configureChildProcess(cmd)
++	cmd.Dir = a.base
++	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8")
++	if progressPath != "" {
++		cmd.Env = append(cmd.Env, "AUTOFLUENT_PROGRESS_FILE="+progressPath)
++	}
++	out, runErr := cmd.CombinedOutput()
++	var result map[string]any
++	if e := json.Unmarshal(bytes.TrimSpace(out), &result); e != nil {
++		return nil, fmt.Errorf("统一截面对比未返回有效 JSON: %v; %s", runErr, trim(string(out), 750))
++	}
++	if runErr != nil {
++		return result, fmt.Errorf("统一截面复算失败: %v; %v", runErr, result["reason"])
++	}
++	return result, nil
++}
++
+ // Archive a compact, read-only Fluent setting snapshot: not a Case/Data copy.
+ func (a *App) archiveScan(snapshot map[string]any) (string, error) {
+ 	if snapshot["schema"] != "autofluent.snapshot.v1" {
+--- a/cmd/autofluent/main_windows.go
++++ b/cmd/autofluent/main_windows.go
+@@ -20,100 +20,102 @@
+ )
+ 
+ const (
+-	wsOverlapped      = 0x00CF0000
+-	wsVisible         = 0x10000000
+-	wsChild           = 0x40000000
+-	wsVScroll         = 0x00200000
+-	wsTabStop         = 0x00010000
+-	wsBorder          = 0x00800000
+-	wsClipChildren    = 0x02000000
+-	wsExClientEdge    = 0x00000200
+-	esAutoHScroll     = 0x0080
+-	esMultiLine       = 0x0004
+-	esAutoVScroll     = 0x0040
+-	esReadOnly        = 0x0800
+-	esWantReturn      = 0x1000
+-	bsPushButton      = 0x00000000
+-	bsOwnerDraw       = 0x0000000B
+-	odsDisabled       = 0x0004
+-	dtCenter          = 0x0001
+-	dtVCenter         = 0x0004
+-	dtSingleLine      = 0x0020
+-	dtEndEllipsis     = 0x8000
+-	enChange          = 0x0300
+-	ssLeft            = 0x00000000
+-	wmDestroy         = 0x0002
+-	wmClose           = 0x0010
+-	wmSize            = 0x0005
+-	wmCommand         = 0x0111
+-	wmPaint           = 0x000F
+-	wmDrawItem        = 0x002B
+-	wmEraseBkgnd      = 0x0014
+-	wmGetMinMaxInfo   = 0x0024
+-	wmSetFont         = 0x0030
+-	wmSetText         = 0x000C
+-	wmCtlColorStatic  = 0x0138
+-	opaqueBkMode      = 2
+-	wmCtlColorEdit    = 0x0133
+-	wmCtlColorBtn     = 0x0135
+-	wmSetIcon         = 0x0080
+-	stmSetIcon        = 0x0170
+-	ssIcon            = 0x0003
+-	wmDpiChanged      = 0x02E0
+-	wmTimer           = 0x0113
+-	wmAppDone         = 0x8001
+-	wmAppStartAuto    = 0x8002
+-	pbmSetPos         = 0x0402
+-	emLimitText       = 0x00C5
+-	emSetSel          = 0x00B1
+-	emScrollCaret     = 0x00B7
+-	swShow            = 5
+-	swHide            = 0
+-	mbYesNo           = 0x4
+-	mbIconWarning     = 0x30
+-	mbIconInfo        = 0x40
+-	mbIconError       = 0x10
+-	idYes             = 6
+-	cbGetCurSel       = 0x0147
+-	cbAddString       = 0x0143
+-	cbResetContent    = 0x014B
+-	cbSetCurSel       = 0x014E
+-	cbsDropDownList   = 0x0003
+-	ofnFileMustExist  = 0x1000
+-	ofnPathMustExist  = 0x0800
+-	ofnExplorer       = 0x80000
+-	imageIcon         = 1
+-	lrLoadFromFile    = 0x0010
+-	fontNormal        = 0
+-	fontStrong        = 1
+-	fontSmall         = 2
+-	fontTitle         = 3
+-	idNavBase         = 1000
+-	idSaveConnect     = 2100
+-	idDiscover        = 2101
+-	idSelftest        = 2102
+-	idScan            = 2103
+-	idPickServer      = 2104
+-	idPickPython      = 2105
+-	idExtract         = 2200
+-	idPreview         = 2201
+-	idPublish         = 2202
+-	idSaveTemplate    = 2203
+-	idPickTemplate    = 2204
+-	idLoadTemplate    = 2205
+-	idWBExport        = 2216
+-	idWBReport        = 2217
+-	idPickFlux        = 2300
+-	idPickH5Config    = 2317
+-	idMetrics         = 2301
+-	idToggleLegacy    = 2316
+-	idScanLibrary     = 2308
+-	idRefreshHistory  = 2400
+-	idSolveIterations = 2412
+-	idPickCompareA    = 2505
+-	idPickCompareB    = 2506
+-	idToggleAdvanced  = 2123
+-	idWBPortLabel     = 2130
++	wsOverlapped       = 0x00CF0000
++	wsVisible          = 0x10000000
++	wsChild            = 0x40000000
++	wsVScroll          = 0x00200000
++	wsTabStop          = 0x00010000
++	wsBorder           = 0x00800000
++	wsClipChildren     = 0x02000000
++	wsExClientEdge     = 0x00000200
++	esAutoHScroll      = 0x0080
++	esMultiLine        = 0x0004
++	esAutoVScroll      = 0x0040
++	esReadOnly         = 0x0800
++	esWantReturn       = 0x1000
++	bsPushButton       = 0x00000000
++	bsOwnerDraw        = 0x0000000B
++	odsDisabled        = 0x0004
++	dtCenter           = 0x0001
++	dtVCenter          = 0x0004
++	dtSingleLine       = 0x0020
++	dtEndEllipsis      = 0x8000
++	enChange           = 0x0300
++	ssLeft             = 0x00000000
++	wmDestroy          = 0x0002
++	wmClose            = 0x0010
++	wmSize             = 0x0005
++	wmCommand          = 0x0111
++	wmPaint            = 0x000F
++	wmDrawItem         = 0x002B
++	wmEraseBkgnd       = 0x0014
++	wmGetMinMaxInfo    = 0x0024
++	wmSetFont          = 0x0030
++	wmSetText          = 0x000C
++	wmCtlColorStatic   = 0x0138
++	opaqueBkMode       = 2
++	wmCtlColorEdit     = 0x0133
++	wmCtlColorBtn      = 0x0135
++	wmSetIcon          = 0x0080
++	stmSetIcon         = 0x0170
++	ssIcon             = 0x0003
++	wmDpiChanged       = 0x02E0
++	wmTimer            = 0x0113
++	wmAppDone          = 0x8001
++	wmAppStartAuto     = 0x8002
++	pbmSetPos          = 0x0402
++	emLimitText        = 0x00C5
++	emSetSel           = 0x00B1
++	emScrollCaret      = 0x00B7
++	swShow             = 5
++	swHide             = 0
++	mbYesNo            = 0x4
++	mbIconWarning      = 0x30
++	mbIconInfo         = 0x40
++	mbIconError        = 0x10
++	idYes              = 6
++	cbGetCurSel        = 0x0147
++	cbAddString        = 0x0143
++	cbResetContent     = 0x014B
++	cbSetCurSel        = 0x014E
++	cbsDropDownList    = 0x0003
++	ofnFileMustExist   = 0x1000
++	ofnPathMustExist   = 0x0800
++	ofnExplorer        = 0x80000
++	imageIcon          = 1
++	lrLoadFromFile     = 0x0010
++	fontNormal         = 0
++	fontStrong         = 1
++	fontSmall          = 2
++	fontTitle          = 3
++	idNavBase          = 1000
++	idSaveConnect      = 2100
++	idDiscover         = 2101
++	idSelftest         = 2102
++	idScan             = 2103
++	idPickServer       = 2104
++	idPickPython       = 2105
++	idExtract          = 2200
++	idPreview          = 2201
++	idPublish          = 2202
++	idSaveTemplate     = 2203
++	idPickTemplate     = 2204
++	idLoadTemplate     = 2205
++	idWBExport         = 2216
++	idWBReport         = 2217
++	idPickFlux         = 2300
++	idPickH5Config     = 2317
++	idGeometryPrecheck = 2318
++	idCommonCut        = 2518
++	idMetrics          = 2301
++	idToggleLegacy     = 2316
++	idScanLibrary      = 2308
++	idRefreshHistory   = 2400
++	idSolveIterations  = 2412
++	idPickCompareA     = 2505
++	idPickCompareB     = 2506
++	idToggleAdvanced   = 2123
++	idWBPortLabel      = 2130
+ )
+ 
+ var (
+@@ -258,7 +260,7 @@
+ 	status, header, subheader, logTitle, output, footer, busyText                                   uintptr
+ 	pythonInput, serverInput, serverList, templateInput, templatePathInput, fluxInput, confirmInput uintptr
+ 	h5Selected                                                                                      string
+-	lastReportHTML                                                                                  string
++	lastReportHTML, lastAnalysisJSON                                                                string
+ 	serverCandidates                                                                                []Candidate
+ 	jobCancel                                                                                       context.CancelFunc
+ 	jobAction                                                                                       string
+@@ -461,7 +463,8 @@
+ 	u.button(3, idBatchH5, "浏览同目录保存解", 528, 234, 214, 42)
+ 	u.button(3, idOpenReport, "查看汇总与明细", 755, 234, 180, 42)
+ 	u.button(3, idPickH5Config, "配置辅助分析（可选）", 235, 291, 230, 35)
+-	u.label(3, 2311, "自动失败或几何有歧义时使用配置；配置不会伪造晶圆、通道及流量。", 479, 294, -1, 28, fontSmall)
++	u.button(3, idGeometryPrecheck, "模型几何预检", 479, 291, 225, 35)
++	u.label(3, 2311, "格式检查不等于几何识别成功；可单独对 Case 做真实壁面预检。", 235, 332, -1, 25, fontSmall)
+ 	u.button(3, idToggleLegacy, "导入历史报告（可选）", 235, 360, 240, 36)
+ 	u.label(3, 2312, "正常分析只需 H5，无需 Codex 报告", 496, 366, -1, 26, fontSmall)
+ 	u.fluxInput = u.edit(3, 2305, "", 235, 401, -1, 31, false, false)
+@@ -491,6 +494,7 @@
+ 	u.compareBInput = u.edit(5, 2511, "", 235, 349, -1, 33, false, false)
+ 	u.button(5, idPickCompareB, "② 选择模型 B", 235, 391, 155, 34)
+ 	u.button(5, idCompare, "③ 核对口径并比较", 235, 441, 250, 38)
++	u.button(5, idCommonCut, "共同截面重新计算 H5", 505, 441, 259, 38)
+ 	u.label(5, 2503, "未核验几何、工况和收敛时，只显示候选差异，不做正式排名。", 235, 494, -1, 29, fontSmall)
+ 	u.label(5, 2504, "", 235, 479, -1, 25, fontSmall)
+ 	u.changePage(3)
+@@ -726,7 +730,12 @@
+ 		setText(c.hwnd, label)
+ 	}
+ 	if c := u.controls[idOpenReport]; c != nil {
+-		enable(c.hwnd, !u.app.isBusy() && isApprovedReportPath(u.app.dataDir, u.lastReportHTML))
++		enable(c.hwnd, !u.app.isBusy() && (isApprovedReportPath(u.app.dataDir, u.lastReportHTML) || isApprovedAnalysisJSON(u.app.dataDir, u.lastAnalysisJSON)))
++		if !isApprovedReportPath(u.app.dataDir, u.lastReportHTML) && isApprovedAnalysisJSON(u.app.dataDir, u.lastAnalysisJSON) {
++			setText(c.hwnd, "仅重试 HTML 导出")
++		} else {
++			setText(c.hwnd, "查看汇总与明细")
++		}
+ 	}
+ 	if c := u.controls[idBatchH5]; c != nil {
+ 		enable(c.hwnd, !u.app.isBusy() && u.h5Selected != "")
+@@ -814,7 +823,7 @@
+ 		u.jobAction = ""
+ 		setText(u.busyText, "就绪")
+ 	}
+-	for _, id := range []int{idSaveConnect, idDiscover, idSelftest, idScan, idScanWork, idHomeH5, idAutoConnect, idRepairPython, idCopyServerCmd, idWBOpenDiag, idPickPython, idPickServer, idSelectServer, idExtract, idPreview, idPublish, idSaveTemplate, idPickTemplate, idLoadTemplate, idPickH5, idPickH5Config, idBatchH5, idToggleLegacy, idPickFlux, idMetrics, idScanLibrary, idOpenReport, idPickCompareA, idPickCompareB, idCompare, idSolveWB, idSolveIterations, idWBExport, idWBReport} {
++	for _, id := range []int{idSaveConnect, idDiscover, idSelftest, idScan, idScanWork, idHomeH5, idAutoConnect, idRepairPython, idCopyServerCmd, idWBOpenDiag, idPickPython, idPickServer, idSelectServer, idExtract, idPreview, idPublish, idSaveTemplate, idPickTemplate, idLoadTemplate, idPickH5, idPickH5Config, idGeometryPrecheck, idBatchH5, idToggleLegacy, idPickFlux, idMetrics, idScanLibrary, idOpenReport, idPickCompareA, idPickCompareB, idCompare, idCommonCut, idSolveWB, idSolveIterations, idWBExport, idWBReport} {
+ 		if c := u.controls[id]; c != nil {
+ 			enable(c.hwnd, !on)
+ 		}
+@@ -1247,6 +1256,95 @@
+ 	}()
+ }
+ 
++func (u *UI) startCommonCutCompare(first, second, config string) {
++	if !u.app.tryStart() {
++		u.log("其他任务进行中，不能同时重复计算保存解")
++		return
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), 3600*time.Second)
++	u.jobCancel = cancel
++	u.setBusy("h5-common-compare", true)
++	u.log("【真实共同截面复算】将依次读取两份保存解，核对真实晶圆分区；不复用旧报告百分比。")
++	go func() {
++		defer cancel()
++		result, err := u.app.recomputeCommonCut(ctx, first, second, config, u.progressPath)
++		status := "候选同口径结果已生成 · 仍须核验工况收敛"
++		if err != nil {
++			status = "统一截面复算未完成"
++		}
++		u.app.record("h5-common-compare", status, fmt.Sprint(err))
++		select {
++		case u.done <- completion{action: "h5-common-compare", result: result, err: err}:
++		default:
++		}
++		if u.hwnd != 0 {
++			pPostMessage.Call(u.hwnd, wmAppDone, 0, 0)
++		}
++	}()
++}
++
++func (u *UI) startGeometryPrecheck(selected, configPath string) {
++	if !u.app.tryStart() {
++		u.log("已有任务执行中，无法同时执行几何预检")
++		return
++	}
++	u.h5Selected = selected
++	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Second)
++	u.jobCancel = cancel
++	u.setBusy("h5-geometry-precheck", true)
++	u.log("【Case 几何预检】扫描实际壁面；不读取 Fluent 流量或压力；不影响上一次物理结果")
++	go func() {
++		defer cancel()
++		result, err := u.app.geometryPrecheckH5(ctx, selected, configPath, u.progressPath)
++		status := "几何预检候选已获得"
++		if err != nil {
++			status = "几何预检执行失败"
++		} else if result["status"] == "blocked" {
++			status = "几何预检存在歧义 · 需要配置或模型复核"
++		}
++		u.app.record("h5-geometry-precheck", status, fmt.Sprint(err))
++		select {
++		case u.done <- completion{action: "h5-geometry-precheck", result: result, err: err}:
++		default:
++		}
++		if u.hwnd != 0 {
++			pPostMessage.Call(u.hwnd, wmAppDone, 0, 0)
++		}
++	}()
++}
++
++func (u *UI) retrySavedReport() {
++	if !isApprovedAnalysisJSON(u.app.dataDir, u.lastAnalysisJSON) {
++		u.log("当前没有可用于重新导出的有效 JSON 结果")
++		return
++	}
++	if !u.app.tryStart() {
++		u.log("已有任务执行中")
++		return
++	}
++	source := u.lastAnalysisJSON
++	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
++	u.jobCancel = cancel
++	u.setBusy("h5-rerender", true)
++	u.showTaskProgress(20, "仅重试 HTML 导出", "从已计算 JSON 生成报告，不重读大型 H5")
++	go func() {
++		defer cancel()
++		res, err := u.app.rerenderNativeJSON(ctx, source)
++		text := "成功"
++		if err != nil {
++			text = "失败"
++		}
++		u.app.record("h5-rerender", text, fmt.Sprint(err))
++		select {
++		case u.done <- completion{action: "h5-rerender", result: res, err: err}:
++		default:
++		}
++		if u.hwnd != 0 {
++			pPostMessage.Call(u.hwnd, wmAppDone, 0, 0)
++		}
++	}()
++}
++
+ func (u *UI) startH5Inspection(selected string) {
+ 	u.startH5InspectionWithConfig(selected, "")
+ }
+@@ -1258,6 +1356,7 @@
+ 	}
+ 	u.h5Selected = selected
+ 	u.lastReportHTML = "" // Do not present previous model's report while this H5 is being processed.
++	u.lastAnalysisJSON = ""
+ 	ctx, cancel := context.WithTimeout(context.Background(), 1800*time.Second)
+ 	u.jobCancel = cancel
+ 	u.setBusy("h5-inspect", true)
+@@ -1382,10 +1481,21 @@
+ 			u.showTaskProgress(u.progressPercent, "任务失败或未确认", trim(c.err.Error(), 70))
+ 		} else if c.action == "h5-inspect" {
+ 			physical, _ := c.result["physical_analysis_status"].(string)
+-			if physical == "native_11_9_profile_computed" || physical == "adaptive_native_candidate_computed" {
++			if c.result["report_save_status"] == "failed" {
++				u.showTaskProgress(100, "计算完成，报告保存失败", "JSON 已保存，可仅重试报告导出")
++			} else if physical == "native_11_9_profile_computed" || physical == "adaptive_native_candidate_computed" {
+ 				u.showTaskProgress(100, "原生统计和新报告已输出", "流量已计算；几何、收敛及对比条件仍待独立核验")
++			} else if physical == "partial_physical_metrics" {
++				u.showTaskProgress(100, "部分物理结果已取得", "端口及可用的压力、挡板结果已保留")
+ 			} else {
+ 				u.showTaskProgress(100, "仅完成 H5 结构诊断", "物理结果未算出；请检查报告中的具体失败原因")
++			}
++		} else if c.action == "h5-rerender" {
++			if c.err != nil {
++				u.showTaskProgress(100, "报告重新导出失败", trim(c.err.Error(), 70))
++			}
++			if c.err == nil {
++				u.showTaskProgress(100, "从 JSON 重新导出完成", "没有重新读取 Case/Data")
+ 			}
+ 		} else {
+ 			u.showTaskProgress(100, "本次任务已结束", "已收到执行回执；物理指标与收敛状态须核对报告")
+@@ -1657,6 +1767,60 @@
+ 			u.syncActions()
+ 			return
+ 		}
++		if c.action == "h5-common-compare" {
++			if c.err != nil {
++				setText(u.status, "共同截面复算未完成 · 未发布差值")
++				u.log("【统一截面对比失败】" + c.err.Error() + "\r\n" + pretty(c.result))
++			} else {
++				if c.result["same_cut_candidate"] == true {
++					setText(u.status, "共同截面候选对比已输出 · 工况与收敛待核验")
++				} else {
++					setText(u.status, "两份数据已重算 · 片间差值不可直接比较")
++				}
++				u.log("【共同截面对比】" + pretty(c.result))
++				if report, ok := c.result["html_file"].(string); ok && isApprovedReportPath(u.app.dataDir, report) {
++					pShellExecute.Call(u.hwnd, uintptr(unsafe.Pointer(ptr("open"))), uintptr(unsafe.Pointer(ptr(report))), 0, 0, 1)
++				}
++			}
++			u.refreshHistory()
++			u.syncActions()
++			return
++		}
++		if c.action == "h5-geometry-precheck" {
++			if c.err != nil {
++				setText(u.status, "Case 几何预检执行失败")
++				u.log("【几何预检错误】" + c.err.Error() + "\r\n" + pretty(c.result))
++			} else {
++				if c.result["status"] == "geometry_candidates_identified_requires_flux_validation" {
++					setText(u.status, "已读取真实晶圆候选 · 流量尚未计算")
++				} else {
++					setText(u.status, "壁面配对待复核 · 文件可能仍有效")
++				}
++				u.log("【Case 几何预检结果】" + pretty(c.result) + "\r\n此结果只验证物理壁面候选；不代表 Fluent 已完成求解。")
++				if artifacts, ok := c.result["artifacts"].(map[string]any); ok {
++					if report, ok := artifacts["html_file"].(string); ok && isApprovedReportPath(u.app.dataDir, report) {
++						pShellExecute.Call(u.hwnd, uintptr(unsafe.Pointer(ptr("open"))), uintptr(unsafe.Pointer(ptr(report))), 0, 0, 1)
++					}
++				}
++			}
++			u.refreshHistory()
++			u.syncActions()
++			return
++		}
++		if c.action == "h5-rerender" {
++			if c.err != nil {
++				setText(u.status, "物理结果仍保留 · HTML 导出失败")
++				u.log("【只重试报告导出失败】" + c.err.Error())
++			} else if report, ok := c.result["html_file"].(string); ok && isApprovedReportPath(u.app.dataDir, report) {
++				u.lastReportHTML = report
++				setText(u.status, "HTML 已从 JSON 恢复 · 未重新计算")
++				u.log("【从已计算 JSON 重新导出报告】" + report)
++				pShellExecute.Call(u.hwnd, uintptr(unsafe.Pointer(ptr("open"))), uintptr(unsafe.Pointer(ptr(report))), 0, 0, 1)
++			}
++			u.refreshHistory()
++			u.syncActions()
++			return
++		}
+ 		if c.action == "h5-inspect" {
+ 			if c.err != nil {
+ 				u.lastReportHTML = ""
+@@ -1666,6 +1830,13 @@
+ 				setText(u.status, "H5 分析已归档 · 片间物理结果待核验")
+ 				if report, ok := c.result["html_file"].(string); ok && report != "" {
+ 					u.lastReportHTML = report
++				}
++				if saved, ok := c.result["analysis_json"].(string); ok && isApprovedAnalysisJSON(u.app.dataDir, saved) {
++					u.lastAnalysisJSON = saved
++				}
++				if c.result["report_save_status"] == "failed" {
++					setText(u.status, "计算已完成，报告保存失败")
++					u.log(fmt.Sprintf("【报告保存失败】JSON：%v；错误：%v。使用本页「仅重试 HTML 导出」不重新读取大型 H5。", c.result["analysis_json"], c.result["export_error"]))
+ 				}
+ 				// Make successive saved solutions immediately available to Model Compare.
+ 				// Never compare them automatically: comparable physical cuts are not yet verified.
+@@ -2095,6 +2266,17 @@
+ 				u.startH5InspectionWithConfig(selected, cfg)
+ 			}
+ 		}
++	case idGeometryPrecheck:
++		selected := u.h5Selected
++		if selected == "" {
++			selected = chooseFile("选择需要做真实几何预检的 Fluent Case 或 Data", "Fluent H5 (*.cas.h5;*.dat.h5)\x00*.cas.h5;*.dat.h5\x00All files\x00*.*\x00")
++		}
++		if selected != "" {
++			// Cancellation of configuration selection means automatic candidate
++			// recognition, not a hidden fallback into an old 11.9 rule.
++			cfg := chooseFile("可选：几何模型配置 JSON（取消则自动识别）", "JSON 配置 (*.json)\x00*.json\x00All files\x00*.*\x00")
++			u.startGeometryPrecheck(selected, cfg)
++		}
+ 	case idBatchH5:
+ 		if u.h5Selected == "" {
+ 			u.log("请先选择一份 H5，软件将扫描它所在目录内的其他保存解。")
+@@ -2105,6 +2287,10 @@
+ 		u.startBatchLocal("report-library", strings.TrimSpace(getText(u.fluxInput)))
+ 	case idOpenReport:
+ 		path := u.lastReportHTML
++		if !isApprovedReportPath(u.app.dataDir, path) && isApprovedAnalysisJSON(u.app.dataDir, u.lastAnalysisJSON) {
++			u.retrySavedReport()
++			return
++		}
+ 		if !isApprovedReportPath(u.app.dataDir, path) {
+ 			u.log("没有可打开的本次分析报告，或报告路径不在 AutoFluent 数据目录内。请先选择 H5 并完成分析。")
+ 			return
+@@ -2131,6 +2317,21 @@
+ 		}
+ 	case idCompare:
+ 		u.startCompare()
++	case idCommonCut:
++		first := chooseFile("选择优化前 Fluent Case/Data 保存解", "Fluent H5 (*.cas.h5;*.dat.h5)\x00*.cas.h5;*.dat.h5\x00All files\x00*.*\x00")
++		if first == "" {
++			return
++		}
++		second := chooseFile("选择优化后 Fluent Case/Data 保存解", "Fluent H5 (*.cas.h5;*.dat.h5)\x00*.cas.h5;*.dat.h5\x00All files\x00*.*\x00")
++		if second == "" {
++			return
++		}
++		config := chooseFile("选择两份保存解共同的真实截面配置 JSON", "JSON 配置 (*.json)\x00*.json\x00All files\x00*.*\x00")
++		if config == "" {
++			u.log("统一截面对比必须指定相同的几何配置与物理截面，不执行默认猜测")
++			return
++		}
++		u.startCommonCutCompare(first, second, config)
+ 	case idRefreshHistory:
+ 		u.refreshHistory()
+ 	case idSolveWB:
+--- a/docs/V2.10.4_晶圆挡板报告发布专项验收.md
++++ b/docs/V2.10.4_晶圆挡板报告发布专项验收.md
+@@ -0,0 +1,54 @@
++# AutoFluent V2.10.4：晶圆、挡板、报告发布专项修改与验收
++
++日期：2026-11-10。改动基于同一 AutoFluent 主线 V2.10.4 开发目录，保留 11.9 专用原生计算路径，不操作 Fluent / Workbench。
++
++## 1. 本轮修复
++
++### 晶圆真实壁面与几何失败定位
++
++- `af_wafer_patches.py`：同一 X 平面可以保留多个独立的壁面片；三角形连通改为**共享网格边**，不再以共享单个顶点强行并片；不因不同片的投影包围盒重叠便提前丢弃。
++- 厚度和 Y/Z 投影配对仍是**一对一**；多个厚度候选时拒绝发布晶圆结果并记录 `first_conflict_x_m` 与 `competing_thickness_m`；真实物理晶圆在相同 X 厚度区间且 Y/Z 占据重叠时拒绝重计。
++- 每层诊断记录真实输入三角形、X 法向与空间筛选数量、连通面片数量、面积过滤、厚度候选、配对及各排片数/通道数。空间范围、孤立片和未知排归属不制造结果；`layers=[]` 不能静默作为完整成功。
++- 自动和配置入口共用面片配对算法。`af_geometry_precheck.py` 也转发实际失败阶段和诊断字典。配置是筛选和核验条件，不是预置的片间结果。
++
++### 挡板开孔与原生流量积分
++
++- 新增 `af_baffle_openings.py`：从选择的板面真实三角网格边界识别**闭合孔轮廓**，上下板面都需找到空间对应孔位。只有真实轮廓可确认且通量积分片全部能够唯一归属时，才发布孔数、孔间 CV 和逐孔分布。
++- 一个孔允许对应多个独立截面积分片；板外边缘通路和**板内无法匹配的积分片**单独记录，不重复计数；`孔 + 边缘 + 未归属 = 整个阶梯截面` 严格核验净通量。
++- `af_adaptive_native.py`：列出所有板面候选坐标、宽度、间距和被选方案；若两个板面候选都合理，返回 `plate_candidate_ambiguous`。可用 `measurement.baffle_y_range_m`（米）限制筛选范围。
++- 只有候选或轮廓不闭合时，状态为 `hole_outline_unverified`，可输出真实的完整截面流量与失败诊断，**不能把截面碎块数量充当真实孔数**。
++
++### 文件发布与桌面重试
++
++- 不再调用 `os.link()`；改为同文件系统暂存 + `os.replace()`。先保留完整 JSON/CSV，再独立生成与发布 HTML，旧报告不覆盖，返回路径只包含已成功提交的完整文件。
++- HTML 生成或落盘失败：返回 `computed_export_failed`、真实计算状态与具体路径/异常；已经写出的 JSON/CSV 保留，不触发「文件结构损坏」降级。
++- 新增桌面「仅重试 HTML 导出」：读取已有 `native_reports` 下已计算 JSON，不重新打开大型 Case/Data；也可运行 `af_render_saved.py` 命令行独立重生成报告。
++- 报告首页展示晶圆逐阶段阻塞以及挡板选板/轮廓诊断；端口流量、压降和成功验证的物理结果保留。
++
++## 2. 运行与数据限制
++
++- Python 测试：**222 / 222 通过**（合成/历史格式测试，非 2.0 真实模型）。Go 测试与 `go vet` 通过；Windows x64 原生 GUI EXE 交叉编译完成。
++- 新增和更新的案例：同 X 对齐双排、交错 Z 重叠、阵列外假壁面、真实实体碰撞、两个合法板面候选、两个物理孔对应多个积分片、板边通路、孔内未归属片，以及 HTML 保存失败后保留完整 JSON 并重生成 HTML。
++- **尚未证明**真实 26,011,622 面 FFF 的晶圆 384 片/380 通道、210 孔识别，未取得 32 GB Windows 真实内存峰值、Windows 多 DPI GUI 实机测试和求解收敛证据。
++- 单相三角面/四面体、X 法向晶圆/Y 主流方向仍是当前明确的计算支持范围。不同拓扑、缺少实体板面轮廓、真实面片相互重叠或不确定孔归属时，拒绝伪造数据。
++- **注意**：实际 FFF 如仍出现晶圆配对失败，请提供新版本生成的「首个实际阻塞」及 `diagnostics`，特别是 `first_conflict_x_m`、`connected_patch_count`、`paired_wafer_count`、`rejected_by`，才能针对真实拓扑复核。
++
++## 3. 复现测试
++
++在源码目录运行：
++
++```bash
++python -m pytest -q
++
++go test ./...
++go vet ./...
++GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '-H=windowsgui -s -w' -o AutoFluent.exe ./cmd/autofluent
++```
++
++Windows 环境下可用已安装的 Python 运行：
++
++```powershell
++python .\worker\af_render_saved.py --json "C:\Users\...\AppData\Roaming\AutoFluentV1\native_reports\native_adaptive_XXX.json" --output-dir "C:\Users\...\AppData\Roaming\AutoFluentV1\native_reports"
++```
++
++这一步 **不读取 Fluent H5**。完整报告仅引用 JSON 中真实统计记录。
+--- a/tests/test_adaptive_full_cff.py
++++ b/tests/test_adaptive_full_cff.py
+@@ -221,19 +221,24 @@
+         cf.close();df.close()
+ 
+ 
+-def test_native_report_publish_rolls_back_if_one_file_cannot_be_created(tmp_path,monkeypatch):
+-    import os
++def test_native_report_publish_keeps_verified_json_if_html_replace_fails(tmp_path,monkeypatch):
++    import os,json
+     import af_adaptive_native
+     case,data=build_synthetic_ald_pair(tmp_path,nplates=8)
+     out=tmp_path/'native_reports';out.mkdir()
+-    real_link=os.link
+-    calls={'n':0}
+-    def fail_second_link(source,destination,*args,**kwargs):
+-        calls['n']+=1
+-        if calls['n']==2:raise OSError('Simulated disk/report publish failure')
+-        return real_link(source,destination,*args,**kwargs)
+-    monkeypatch.setattr(af_adaptive_native.os,'link',fail_second_link)
+-    with pytest.raises(OSError,match='publish failure'):
+-        af_adaptive_native.try_adaptive_native(case,data,out)
+-    # No incomplete or orphaned reports should survive a failed publish.
+-    assert list(out.iterdir())==[]
++    original_replace=os.replace
++    def fail_html_commit(source,destination,*args,**kwargs):
++        if str(destination).endswith('.html'):
++            raise OSError('Simulated disk/report publish failure')
++        return original_replace(source,destination,*args,**kwargs)
++    monkeypatch.setattr(af_adaptive_native.os,'replace',fail_html_commit)
++    got=af_adaptive_native.try_adaptive_native(case,data,out)
++    assert got['status']=='computed_export_failed'
++    assert got['computed_status']=='adaptive_native_candidate_computed'
++    assert 'publish failure' in got['export_error']['reason']
++    assert Path(got['json_file']).is_file()
++    assert Path(got['csv_file']).is_file()
++    assert got.get('html_file') is None
++    stored=json.loads(Path(got['json_file']).read_text('utf-8'))
++    assert stored['geometry']['total_channels']==24
++    assert sorted(p.suffix for p in out.iterdir())==['.csv','.json']
+--- a/tests/test_v2104_failtrace_baffle_export.py
++++ b/tests/test_v2104_failtrace_baffle_export.py
+@@ -0,0 +1,146 @@
++"""Counterexamples: physical patches, baffle wall rings, partial export safety."""
++import json,sys
++from pathlib import Path
++import numpy as np
++import pytest
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT/'worker'))
++from af_wafer_patches import extract_patches,PatchRecognitionError
++from af_adaptive_geometry import identify_from_configured_wall_triangles, GeometryAmbiguous
++from af_baffle_openings import find_planar_openings,match_flux_components
++from test_v211_overlap_and_pairing import _config,_overlapping_wafer_triangles
++from af_model_config import validate_model_config
++
++
++def plate(y, holes=(),n=8):
++    tris=[]
++    for i in range(n):
++        for j in range(n):
++            if any(a<=i<b and c<=j<d for a,b,c,d in holes):continue
++            x0,x1=i*.01,(i+1)*.01;z0,z1=j*.01,(j+1)*.01
++            a=[x0,y,z0];b=[x1,y,z0];c=[x1,y,z1];d=[x0,y,z1]
++            tris.extend([[a,b,c],[a,c,d]])
++    return np.asarray(tris,float)
++
++
++def test_wafer_screening_reports_counts_and_rejected_external_surface():
++    from test_adaptive_geometry import rectangles
++    triangles=rectangles(n=8,layers=1)
++    outside=rectangles(n=1,layers=1,z_rows=1) + np.array([[[2.,0,0]]])
++    diag={};all_tri=np.concatenate([triangles,outside])
++    patches=extract_patches(all_tri,tol=1e-7,y_range=(-1,1),x_range=(-.01,.8),diagnostics=diag)
++    assert diag['raw_wall_triangle_count']==len(all_tri)
++    assert diag['spatially_filtered_triangle_count']==len(triangles)
++    assert len(patches)==32
++    assert diag['connected_patch_count']==32
++
++
++def test_wafer_true_collision_has_staged_coordinate_and_reason():
++    c=_config();v=_overlapping_wafer_triangles();v[32:,:,0]-=.03
++    with pytest.raises(GeometryAmbiguous) as err:
++        identify_from_configured_wall_triangles(v,validate_model_config(c))
++    exc=err.value
++    assert exc.stage=='row_assignment'
++    assert exc.diagnostics['first_conflict_x_m']==pytest.approx(0)
++    assert exc.diagnostics['rejected_by']=='physically_overlapping_wafer_panels'
++    assert exc.diagnostics['connected_patch_count']==32
++
++
++def test_aligned_two_rows_same_x_remain_separate_when_spatially_disjoint():
++    from test_adaptive_geometry import rectangles
++    v=rectangles(n=8,layers=1,z_rows=2,wide_gap=False,shifted=False)
++    # The automatic path must not collapse two rows at one X station.
++    from af_adaptive_geometry import identify_from_wall_triangles
++    geo=identify_from_wall_triangles(v)
++    assert geo['total_plates']==16 and geo['total_channels']==14
++
++
++def test_two_candidate_baffle_plates_do_not_silently_select_one(monkeypatch):
++    import af_adaptive_native as native
++    # Two thin plate pairs over two separate floor stations: both plausible.
++    tr=np.concatenate([plate(y) for y in (-.1,-.08,-.079,-.07,-.05,-.049)])
++    monkeypatch.setattr(native,'_horizontal_wall_triangles',lambda mesh:tr)
++    result=native._baffle_plenum_candidates({'xyz':np.array([[0,-.1,0],[.08,-.049,.08]])},None,None)
++    assert result['status']=='plate_candidate_ambiguous'
++    assert len(result['diagnostics']['plate_candidates'])>=2
++    assert 'baffle_y_range_m' in result['reason']
++
++
++def _piece(x,z,q,*,width=.003):
++    return {'center_m':[x,-.05,z],'width_x_m':width,'width_z_m':width,
++            'net_kg_s':q,'positive_kg_s':max(0.,q),
++            'negative_magnitude_kg_s':max(0.,-q),'face_count':2}
++
++
++def test_opening_contours_merge_split_pieces_and_keep_edge_flux():
++    t=plate(0,((2,4,2,4),(5,7,5,7)))
++    r=find_planar_openings(t,0,1e-6)
++    assert r['status']=='closed_contours'
++    assert len(r['openings'])==2
++    pieces=[_piece(.026,.03,1e-7),_piece(.034,.03,2e-7),
++            _piece(.06,.06,4e-7),_piece(.09,.09,3e-7)]
++    flow=match_flux_components(r['openings'],r['outers'],pieces,
++                               full_cut_net_kg_s=1e-6)
++    assert flow['status']=='verified_openings'
++    assert [len(h['component_ids']) for h in flow['holes']]==[2,1]
++    assert flow['edge_net_kg_s']==pytest.approx(3e-7)
++    assert flow['hole_net_kg_s']==pytest.approx(7e-7)
++    assert flow['closure_error_kg_s']==pytest.approx(0)
++
++
++def test_unassigned_inside_solid_plate_prevents_false_hole_cv():
++    r=find_planar_openings(plate(0,((2,4,2,4),)),0,1e-6)
++    flow=match_flux_components(r['openings'],r['outers'],[_piece(.03,.03,2e-7),_piece(.055,.055,1e-7)],
++                               full_cut_net_kg_s=3e-7)
++    assert flow['status']=='candidate_unverified'
++    assert flow['diagnostics']['verified_hole_count'] is None
++    assert flow['unassigned_net_kg_s']==pytest.approx(1e-7)
++    assert flow['closure_error_kg_s']==pytest.approx(0)
++
++
++def test_html_render_failure_keeps_full_json_recoverable(tmp_path,monkeypatch):
++    from test_adaptive_full_cff import build_synthetic_ald_pair
++    import af_adaptive_native,af_report_v3,af_render_saved
++    case,data=build_synthetic_ald_pair(tmp_path,nplates=8)
++    original=af_report_v3.render_native_report
++    with monkeypatch.context() as m:
++        m.setattr(af_report_v3,'render_native_report',lambda *a,**k:(_ for _ in ()).throw(RuntimeError('Rendering failure')))
++        value=af_adaptive_native.try_adaptive_native(case,data,tmp_path/'out')
++    assert value['status']=='computed_export_failed'
++    assert value['metrics']['status']=='adaptive_native_candidate_computed'
++    assert Path(value['json_file']).exists()
++    assert not value.get('html_file')
++    assert 'Rendering failure' in value['export_error']['reason']
++    html=af_render_saved.render_stored_json(value['json_file'])
++    assert '仿真结果与结构优化' in html
++
++
++def test_baffle_end_to_end_uses_real_outlines_not_fragment_count(monkeypatch):
++    """Two physical apertures, three native cut pieces + board edge: 2 holes."""
++    import af_adaptive_native as native
++    wall=np.concatenate([plate(-.100),
++                         plate(-.080,((2,4,2,4),(5,7,5,7))),
++                         plate(-.079,((2,4,2,4),(5,7,5,7)))])
++    monkeypatch.setattr(native,'_horizontal_wall_triangles',lambda mesh:wall)
++    # Four disconnected native triangles: two fragments of hole 1, one in
++    # hole 2, and one outside the physical plate boundary.
++    pieces=[(.026,.030,1e-7),(.034,.030,2e-7),(.060,.060,4e-7),(.090,.090,3e-7)]
++    nodes=[];conn=[]
++    for x,z,_ in pieces:
++        base=len(nodes)
++        nodes.extend([(x-.001,-.0795,z-.001),(x+.001,-.0795,z-.001),(x,-.0795,z+.001)])
++        conn.append([base,base+1,base+2])
++    mesh={'xyz':np.asarray(nodes,dtype=float),'conn':np.asarray(conn,dtype=int),
++          'wall_ids':np.asarray([],dtype=int),'inside':np.arange(4),
++          'owner':np.ones(4,dtype=int),'neighbors':np.full(4,2,dtype=int),
++          'flux':np.asarray([p[2] for p in pieces]),'result_group':'1',
++          'phase_group':'phase-1','nc':2}
++    centroids=np.asarray([[0,0,0],[0,-.081,0],[0,-.078,0]],float)
++    result=native._baffle_plenum_candidates(mesh,centroids,{})
++    assert result['status']=='geometry_candidate_holes_native_flux_computed'
++    assert result['hole_count']==2
++    assert result['candidate_integral_component_count']==4
++    assert result['board_cut_closure_error_kg_s']==pytest.approx(0)
++    assert result['board_edge_net_kg_s']==pytest.approx(-3e-7)
++    assert result['total_hole_net_kg_s']==pytest.approx(-7e-7)
++    assert any(len(h['integration_component_ids'])==2 for h in result['holes'])
+--- a/tests/test_v2104_precheck_and_common_cut.py
++++ b/tests/test_v2104_precheck_and_common_cut.py
+@@ -0,0 +1,121 @@
++"""V2.10.4 regression: source-case geometry scan, multi-snapshot pairing, common-cut H5 rerun."""
++import json
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT/'worker'))
++from af_geometry_precheck import precheck_case_geometry,write_precheck_report
++from af_common_cut_compare import compare_saved_pairs_common_cut, render_common_cut_html
++from af_h5_batch import inventory
++from af_model_config import load_model_config
++from af_render_saved import render_stored_json
++from test_adaptive_full_cff import build_synthetic_ald_pair
++
++
++def test_case_only_geometry_check_works_without_data_file(tmp_path):
++    case,data=build_synthetic_ald_pair(tmp_path,nplates=8,staggered=True)
++    data.unlink()  # deliberate: actual Case precheck must not require saved solution
++    output=precheck_case_geometry(case)
++    assert output['status']=='geometry_candidates_identified_requires_flux_validation'
++    assert output['geometry']['total_plates']==32
++    assert output['geometry']['total_channels']==24
++    assert output['scanned_wall_faces']>=output['x_normal_candidates']
++    assert output['note'].startswith('Case-only')
++    artifacts=write_precheck_report(output,tmp_path/'precheck')
++    assert '模型几何预检' in Path(artifacts['html_file']).read_text(encoding='utf8')
++
++
++def test_case_geometry_check_honours_config_and_blocks_mismatch(tmp_path):
++    case,data=build_synthetic_ald_pair(tmp_path,nplates=8,staggered=True)
++    config=load_model_config(ROOT/'templates/geometry_config_example_staggered.json')
++    pre=precheck_case_geometry(case,config=config)
++    assert pre['status']=='geometry_candidates_identified_requires_flux_validation'
++    assert len(pre['layers'])==2
++    assert sum(r['wafer_count'] for layer in pre['layers'] for r in layer['rows'])==32
++    config['expected']['wafer_count']=999
++    failed=precheck_case_geometry(case,config=config)
++    assert failed['status']=='blocked'
++    assert 'expected.wafer_count' in failed['blocker']['reason']
++
++
++def test_geometry_check_cli_is_separate_from_config_format_check(tmp_path):
++    case,data=build_synthetic_ald_pair(tmp_path,nplates=8,staggered=True)
++    config_file=ROOT/'templates/geometry_config_example_staggered.json'
++    c=subprocess.run([sys.executable,str(ROOT/'worker/af_h5_offline.py'),
++        '--file',str(case),'--config',str(config_file),'--geometry-check',
++        '--output-dir',str(tmp_path/'precheck')],capture_output=True,text=True,timeout=45)
++    assert c.returncode==0,c.stderr[-500:]
++    result=json.loads(c.stdout)
++    assert result['status']=='geometry_candidates_identified_requires_flux_validation'
++    assert Path(result['artifacts']['json_file']).is_file()
++    assert '原生' not in result['note']  # note is an explicit no-flux disclaimer
++
++
++def test_batch_exposes_two_snapshots_referencing_one_case(tmp_path):
++    h5py=pytest.importorskip('h5py')
++    case,data=build_synthetic_ald_pair(tmp_path,nplates=8,staggered=True)
++    later=tmp_path/'synthetic-8-00037.dat.h5'
++    with h5py.File(data,'r') as source,h5py.File(later,'w') as dest:
++        for key in source.keys():source.copy(key,dest)
++    inv=inventory(tmp_path)
++    assert len(inv['pairs'])==2
++    assert {x['snapshot_name'] for x in inv['pairs']}=={data.name,later.name}
++    assert all(x['case']['path']==str(case) for x in inv['pairs'])
++    assert inv['missing_data']==[]
++
++
++def test_common_cut_recomputes_not_subtract_cached_reports(tmp_path):
++    cfg=load_model_config(ROOT/'templates/geometry_config_example_staggered.json')
++    a,b=tmp_path/'before',tmp_path/'after';a.mkdir();b.mkdir()
++    case_a,data_a=build_synthetic_ald_pair(a,nplates=8,staggered=True)
++    case_b,data_b=build_synthetic_ald_pair(b,nplates=8,staggered=True)
++    out=compare_saved_pairs_common_cut(case_a,case_b,cfg)
++    assert out['status']=='recomputed_same_cut_candidate_not_final_qualified'
++    assert out['comparison']['same_cut_candidate'] is True
++    assert all(v['wafer_metric_difference_allowed'] for v in out['observations_by_layer'].values())
++    assert all(v['cv_pct'][0]==pytest.approx(v['cv_pct'][1]) for v in out['observations_by_layer'].values())
++    assert len(out['source_results']['before']['layers']['upper']['channels'])>0
++    assert '真实数据已重新计算' not in render_common_cut_html(out) or out['source_results']['before']['status']=='adaptive_native_candidate_computed'
++    assert '同一物理截面' not in out['limitations'][1]  # independent limitations remain explicit
++    html=render_common_cut_html(out)
++    assert '<details>' in html and '变化 pp' in html and 'https://' not in html
++    jp=tmp_path/'saved.json';jp.write_text(json.dumps(out),encoding='utf8')
++    assert '统一截面' in render_stored_json(jp)
++
++
++def test_common_cut_different_measured_row_positions_prevents_wafer_delta(tmp_path):
++    cfg=load_model_config(ROOT/'templates/geometry_config_example_staggered.json')
++    a,b=tmp_path/'before',tmp_path/'after';a.mkdir();b.mkdir()
++    c1,d1=build_synthetic_ald_pair(a,nplates=8,staggered=True)
++    c2,d2=build_synthetic_ald_pair(b,nplates=8,staggered=False)
++    out=compare_saved_pairs_common_cut(c1,c2,cfg)
++    assert out['comparison']['same_cut_candidate'] is False
++    assert all(not v['wafer_metric_difference_allowed'] for v in out['observations_by_layer'].values())
++    assert all(v['fraction_delta_pp'] is None for v in out['comparison']['layers'].values())
++
++
++def test_common_cut_requires_explicit_physical_y_cuts(tmp_path):
++    cfg=load_model_config(ROOT/'templates/geometry_config_example_staggered.json')
++    del cfg['layers'][0]['cut_y_m']
++    with pytest.raises(ValueError,match='cut_y_m'):
++        compare_saved_pairs_common_cut('not_used.cas.h5','not_used2.cas.h5',cfg)
++
++
++def test_progress_scope_is_monotone(tmp_path,monkeypatch):
++    from af_progress import set_scope,update
++    import af_progress
++    f=tmp_path/'progress.json'
++    monkeypatch.setenv('AUTOFLUENT_PROGRESS_FILE',str(f))
++    try:
++        set_scope(0,45);update(91,'before',force=True)
++        p1=json.loads(f.read_text())['percent']
++        set_scope(45,90);update(17,'after',force=True)
++        p2=json.loads(f.read_text())['percent']
++        assert 0<=p1<=p2<90
++    finally:
++        set_scope(0,100)
++        af_progress._LAST_PERCENT=-1
+--- a/worker/af_adaptive_geometry.py
++++ b/worker/af_adaptive_geometry.py
+@@ -12,7 +12,10 @@
+ 
+ 
+ class GeometryAmbiguous(ValueError):
+-    pass
++    def __init__(self, message, *, stage=None, diagnostics=None):
++        super().__init__(message)
++        self.stage=stage
++        self.diagnostics=dict(diagnostics or {})
+ 
+ 
+ def _bins_minimum_split(values, weights, *, n_bins=160, imbalance_limit=.32):
+@@ -161,10 +164,12 @@
+     ybands=[(float('-inf'),split_y),(split_y,float('inf'))] if split_y is not None else [(float('-inf'),float('inf'))]
+     layers=[]
+     for ya,yb in ybands:
++        diagnostic={'layer_id':len(layers)+1,'y_range_m':[float(v) if math.isfinite(v) else None for v in (ya,yb)]}
+         try:
+-            patches=extract_patches(v,tol=tol,y_range=(ya,yb))
++            patches=extract_patches(v,tol=tol,y_range=(ya,yb),diagnostics=diagnostic)
+         except PatchRecognitionError as exc:
+-            raise GeometryAmbiguous('Auto wall patch recognition failed: '+str(exc)) from exc
++            raise GeometryAmbiguous('Auto wall patch recognition failed: '+str(exc),
++                                    stage=exc.stage,diagnostics={**diagnostic,**exc.diagnostics}) from exc
+         # Z row hypothesis is learned from actual disconnected panel shapes,
+         # not from coincident X station counts. Each intact panel is assigned
+         # once, even when two rows share all X positions.
+@@ -195,14 +200,16 @@
+         try:
+             thickness=_infer_thickness(patches,tol)
+             rows,evidence=pair_wafer_patches(patches,thickness_range=thickness,
+-                                             row_ranges=row_ranges,min_plates=min_plates)
++                                             row_ranges=row_ranges,min_plates=min_plates,
++                                             diagnostics=diagnostic)
+         except PatchRecognitionError as exc:
+-            raise GeometryAmbiguous('Auto layer wafer pairing: '+str(exc)) from exc
++            raise GeometryAmbiguous('Auto layer wafer pairing: '+str(exc),
++                                    stage=exc.stage,diagnostics={**diagnostic,**exc.diagnostics}) from exc
+         ylo=min(r['y_min_m'] for r in rows);yhi=max(r['y_max_m'] for r in rows)
+         layers.append({'id':len(layers)+1,'rows':rows,'y_cut_m':(ylo+yhi)/2.,
+                        'y_min_m':ylo,'y_max_m':yhi,
+                        'channels':sum(len(r['regular_gap_index']) for r in rows),
+-                       'wafer_pairing_diagnostics':evidence})
++                       'wafer_pairing_diagnostics':{**evidence,'pipeline':diagnostic}})
+     if len(layers)>1:
+         for left,right in zip(layers,layers[1:]):
+             if left['y_max_m']>right['y_min_m']+tol*4:
+@@ -464,15 +471,19 @@
+         row_cfgs=sorted(layer_cfg['rows'],key=lambda d:d['z_range_m'][0])
+         x_range=layer_cfg.get('wafer_x_range_m')
+         overlap=(len(row_cfgs)==2 and row_cfgs[0]['z_range_m'][1]>row_cfgs[1]['z_range_m'][0])
++        diagnostic={'layer_id':layer_cfg['id'],'y_range_m':[ya,yb],
++                    'configured_x_range_m':x_range,'row_z_ranges_m':[r['z_range_m'] for r in row_cfgs]}
+         try:
+-            patches=extract_patches(v,tol=tol,y_range=(ya,yb),x_range=x_range)
++            patches=extract_patches(v,tol=tol,y_range=(ya,yb),x_range=x_range,
++                                    diagnostics=diagnostic)
+             rows,evidence=pair_wafer_patches(
+                 patches,thickness_range=config['wafer']['thickness_range_m'],
+                 row_ranges=[r['z_range_m'] for r in row_cfgs],
+                 regular_gap_range=config['wafer']['regular_gap_range_m'],
+-                x_range=x_range,min_plates=min_plates)
++                x_range=x_range,min_plates=min_plates,diagnostics=diagnostic)
+         except PatchRecognitionError as exc:
+-            raise GeometryAmbiguous('Layer %s: %s' %(layer_cfg['id'],exc)) from exc
++            raise GeometryAmbiguous('Layer %s: %s' %(layer_cfg['id'],exc),
++                                    stage=exc.stage,diagnostics={**diagnostic,**exc.diagnostics}) from exc
+         for j,(row,row_cfg) in enumerate(zip(rows,row_cfgs)):
+             row.update(id=row_cfg['id'],configured_z_search_range_m=row_cfg['z_range_m'],
+                        paired_station_evidence=evidence)
+@@ -496,14 +507,16 @@
+                          'central_bypass':config.get('partition',{}).get('central_bypass','auto'),
+                          'configured_y_search_range_m':[ya,yb],
+                          'configured_x_search_range_m':x_range,
+-                         'wafer_pairing_diagnostics':evidence})
++                         'wafer_pairing_diagnostics':{**evidence,'pipeline':diagnostic}})
+     wafer_count=sum(sum(row['plate_count'] for row in layer['rows']) for layer in measured)
+     channel_count=sum(layer['channels'] for layer in measured)
+     for label,actual in (('wafer_count',wafer_count),('channel_count',channel_count)):
+         reference=config.get('expected',{}).get(label)
+         if reference is not None and reference!=actual:
+             raise GeometryAmbiguous('Configured expected.%s=%s disagrees with identified geometry=%s'
+-                                    %(label,reference,actual))
++                                    %(label,reference,actual),stage='expected_model_validation',
++                                    diagnostics={'actual_wafer_count':wafer_count,'actual_channel_count':channel_count,
++                                                 'expected':config.get('expected',{})})
+     return {'schema':'autofluent.geometry_configured.v1','status':'candidate_needs_flux_validation',
+             'assumptions':['Measured connected X-normal wall panels',
+                            'One-to-one front/back wafer pairs before row assignment',
+--- a/worker/af_adaptive_native.py
++++ b/worker/af_adaptive_native.py
+@@ -827,6 +827,49 @@
+                  'status':'not_available','reason':str(exc)[:190]} for x in stations]
+ 
+ 
++def _module_result_envelopes(modules, ports, pressure, baffle, geometry, layers):
++    """Independent physical metric statuses with values, checks and reasons."""
++    def envelope(key, values, checks=None):
++        item=modules.get(key,{})
++        return {'status':item.get('status','not_executed'),
++                'values':values,'checks':checks or {},
++                'reason':item.get('reason',''), 'source':item.get('source','')}
++    stations=pressure.get('stations',[])
++    station_ok=sum(x.get('status')=='computed_arithmetic_cell_sample' for x in stations)
++    station_status=('not_applicable' if not stations else 'completed' if station_ok==len(stations)
++                    else 'partial' if station_ok else 'not_available')
++    return {'schema':'autofluent.module_results.v1',
++            'case_and_flux':envelope('pair_and_native_flux',{}),
++            'port_flux':envelope('port_flux',{
++                'inlet_net_kg_s':ports.get('inlet_kg_s'),
++                'outlet_net_kg_s':ports.get('outlet_kg_s')},
++                {'mass_imbalance_pct':ports.get('mass_imbalance_pct'),
++                 'external_face_audit':ports.get('external_face_audit')}),
++            'port_pressure':envelope('port_pressure',{
++                'pressure_drop_pa':pressure.get('pressure_drop_pa'),
++                'definition':pressure.get('definition')},
++                {'mach_screening_note':pressure.get('mach_screening_note','not_verified')}),
++            'pressure_stations':{'status':station_status,'values':{
++                'configured_station_count':len(stations),'computed_station_count':station_ok},
++                'checks':{'sample_type':'unweighted cell-centre arithmetic samples'},
++                'reason':'one or more configured stations unavailable' if station_ok<len(stations) else ''},
++            'baffle':envelope('baffle',{
++                'hole_count':baffle.get('hole_count'), 'hole_row_count':baffle.get('hole_row_count'),
++                'hole_cv_pct':baffle.get('all_hole_cv_pct'),
++                'board_edge_net_kg_s':baffle.get('board_edge_net_kg_s')},
++                {'cut_closure_error_kg_s':baffle.get('board_cut_closure_error_kg_s'),
++                 'expected_hole_check':baffle.get('expected_hole_check','not_configured')}),
++            'wafer_geometry':envelope('wafer_geometry',{
++                'identified_wafer_count':(geometry or {}).get('total_plates'),
++                'identified_channel_count':(geometry or {}).get('total_channels')}),
++            'wafer_partition_and_bypass':envelope('wafer_partition_and_bypass',{
++                key:{'channel_count':v['channel_count'],'net_kg_s':v['net_kg_s'],
++                     'cv_pct':v['cv_pct'],'cut_height_m':v['cut_height_m']}
++                for key,v in layers.items()}),
++            'convergence':envelope('convergence',{},
++                {'source':'saved snapshot alone cannot verify solver convergence'})}
++
++
+ def analyze_saved_pair(case_path,data_path, *, config=None):
+     """Compute native cut flux for geometry inferred from current saved Case.
+ 
+@@ -861,7 +904,7 @@
+         pressure['stations']=_configured_pressure_stations(mesh,centers,df,config)
+         progress(72,'独立挡板计算','无须等待晶圆壁面完成配对')
+         try:
+-            baffle=_baffle_plenum_candidates(mesh,centers,df)
++            baffle=_baffle_plenum_candidates(mesh,centers,df,config=config)
+         except (UnsupportedCFF,GeometryAmbiguous,ValueError,IndexError,KeyError,TypeError,MemoryError) as exc:
+             baffle={'status':'not_identified','reason':str(exc)[:350]}
+         if config and config.get('expected',{}).get('baffle_hole_count') is not None:
+@@ -895,6 +938,10 @@
+                     geometry=identify_from_configured_wall_triangles(walls,config)
+                 else:
+                     geometry=identify_from_wall_triangles(walls)
++                if not geometry.get('layers'):
++                    raise GeometryAmbiguous('No wafer layers identified after wall pairing',
++                                            stage='layer_generation',
++                                            diagnostics={'identified_layers':0})
+             finally:
+                 del walls
+             modules['wafer_geometry']={'status':'completed','source':'measured connected X-normal wall patches',
+@@ -933,9 +980,13 @@
+                 }
+             modules['wafer_partition_and_bypass']={'status':'completed','source':'unique native face ownership and signed flux closure'}
+         except (GeometryAmbiguous,UnsupportedCFF,ValueError,KeyError,IndexError,TypeError,RuntimeError,MemoryError) as exc:
+-            geometry_error={'stage':stage,'error_type':type(exc).__name__,'reason':str(exc)[:700]}
++            geometry_error={'stage':getattr(exc,'stage',None) or stage,
++                            'pipeline_stage':stage,
++                            'error_type':type(exc).__name__,'reason':str(exc)[:700],
++                            'diagnostics':getattr(exc,'diagnostics',{})}
+             modules['wafer_geometry' if stage=='wafer_wall_pairing' else 'wafer_partition_and_bypass']={
+-                'status':'blocked','stage':stage,'reason':geometry_error['reason']}
++                'status':'blocked','stage':geometry_error['stage'],
++                'reason':geometry_error['reason'],'diagnostics':geometry_error['diagnostics']}
+         if before_case!=file_identity(case) or before_data!=file_identity(data):
+             raise UnsupportedCFF('Case/Data was replaced or modified while reading; retry only after Fluent has finished saving')
+         if geometry_error is not None:
+@@ -948,6 +999,7 @@
+                                   'input_files_unchanged_during_analysis':True},
+                     'port_flux':ports,'pressure':pressure,'baffle':baffle,
+                     'geometry':geometry,'layers':layers,'modules':modules,
++                    'metric_modules':_module_result_envelopes(modules,ports,pressure,baffle,geometry,layers),
+                     'first_full_analysis_blocker':geometry_error,
+                     'checks':{'global_port_mass_imbalance_pct':ports['mass_imbalance_pct'],
+                               'cut_partition_closure':'not_computed' if not layers else 'partial'},
+@@ -979,6 +1031,7 @@
+                               'input_files_unchanged_during_analysis':True},
+                 'geometry':geometry, 'port_flux':ports,'layers':layers,
+                 'modules':modules,
++                'metric_modules':_module_result_envelopes(modules,ports,pressure,baffle,geometry,layers),
+                 'tetra_topology_spotcheck':tetra_evidence,
+                 'pressure':pressure,'baffle':baffle,
+                 'checks':{'global_port_mass_imbalance_pct':ports['mass_imbalance_pct'],
+@@ -1027,7 +1080,8 @@
+     # files are complete. HTML content refers to final paths, not staging paths.
+     staging=Path(tempfile.mkdtemp(prefix='.af_partial_',dir=out))
+     stage_paths={k:str(staging/Path(v).name) for k,v in paths.items()}
+-    published=[]
++    published={}
++    export_error=None
+     try:
+         row=[]
+         for layer_name,layer in result['layers'].items():
+@@ -1062,6 +1116,15 @@
+             writer.writeheader();writer.writerows(row)
+         with open(stage_paths['json_file'],'x',encoding='utf-8') as f:
+             json.dump(result,f,ensure_ascii=False,indent=2,allow_nan=False)
++        # Publish the already-calculated JSON and CSV first, independent of
++        # HTML rendering. Atomic same-directory replacements work on Windows
++        # filesystems where hard-link creation is forbidden. Random unique
++        # basename + exclusive no-overwrite check protect old reports.
++        for key in ('json_file','csv_file'):
++            if Path(paths[key]).exists():
++                raise FileExistsError('Refusing to overwrite existing '+paths[key])
++            os.replace(stage_paths[key],paths[key])
++            published[key]=paths[key]
+         # No legacy HTML is created: a rendering failure must not silently
+         # publish a different design. All figures come from validated metrics.
+         from af_progress import update as progress
+@@ -1083,18 +1146,29 @@
+         except Exception as exc:
+             raise RuntimeError('统一报告生成失败；未输出旧版报告：%s: %s' %
+                                (type(exc).__name__, str(exc)[:220])) from exc
+-        with open(stage_paths['html_file'],'x',encoding='utf-8') as f:f.write(html)
+-        # Atomic publication: never expose incomplete CSV/JSON/HTML, do not
+-        # overwrite a previous report, and roll back if any final link fails.
+-        for key in ('csv_file','json_file','html_file'):
+-            os.link(stage_paths[key],paths[key])  # exclusive create on same filesystem
+-            published.append(paths[key])
+-        return {'status':result['status'],'metrics':result,'no_physical_result':False,**paths}
++        with open(stage_paths['html_file'],'x',encoding='utf-8') as f:
++            f.write(html)
++            f.flush();os.fsync(f.fileno())
++        if Path(paths['html_file']).exists():
++            raise FileExistsError('Refusing to overwrite existing '+paths['html_file'])
++        os.replace(stage_paths['html_file'],paths['html_file'])
++        published['html_file']=paths['html_file']
++        return {'status':result['status'],'metrics':result,'no_physical_result':False,
++                'report_save_status':'completed',**published}
++    except (OSError,RuntimeError,ValueError,TypeError) as exc:
++        # Computation is already complete. Never reclassify the physical
++        # result as an invalid CFF or discard successfully published JSON.
++        return {'status':'computed_export_failed','computed_status':result['status'],
++                'metrics':result,'no_physical_result':False,
++                'report_save_status':'failed',
++                'export_error':{'stage':'report_publication','error_type':type(exc).__name__,
++                                'reason':str(exc)[:650],
++                                'retry_cli':'python af_render_saved.py --json <saved-json> --output-dir <folder>'
++                                             if 'json_file' in published else None},
++                **published}
+     finally:
+-        if len(published)!=len(paths):
+-            for final in published:
+-                try:Path(final).unlink()
+-                except OSError:pass
++        # Keep any complete outputs. No partially written path is returned.
++        # JSON is the source of truth for re-exporting HTML without H5 reload.
+         shutil.rmtree(staging,ignore_errors=True)
+ 
+ 
+@@ -1112,128 +1186,186 @@
+     return np.concatenate(patches) if patches else np.empty((0,3,3),dtype=float)
+ 
+ 
+-def _baffle_plenum_candidates(mesh,centroids,df):
+-    """Optional geometry-derived baffle-hole and lower-plenum diagnostics.
+-
+-    This is *not* required for wafer analysis; refuse unsupported holes rather
+-    than failing the entire saved-solution calculation. No assumed 245 holes,
+-    seven rows, or absolute Y offsets.
++def _plenum_xz_pressure_bins(centroids, pressure, *, x_bins=26, z_bins=14):
++    """True cell-centred static-pressure spatial bins; no interpolation/CFD contour claim."""
++    import numpy as np
++    coords=np.asarray(centroids,dtype=np.float64)
++    values=np.asarray(pressure,dtype=np.float64).reshape(-1)
++    if len(coords)!=len(values) or len(values)<20 or coords.shape[1]!=3:
++        return []
++    valid=np.isfinite(coords).all(axis=1)&np.isfinite(values)
++    if valid.sum()<20:return []
++    c=coords[valid];v=values[valid]
++    if np.ptp(c[:,0])<=0 or np.ptp(c[:,2])<=0:return []
++    count,xe,ze=np.histogram2d(c[:,0],c[:,2],bins=(x_bins,z_bins))
++    amount,_,_=np.histogram2d(c[:,0],c[:,2],bins=(xe,ze),weights=v)
++    cells=[]
++    for i,j in np.argwhere(count>=3):
++        cells.append({'x_lo_m':float(xe[i]),'x_hi_m':float(xe[i+1]),
++                      'z_lo_m':float(ze[j]),'z_hi_m':float(ze[j+1]),
++                      'mean_pa':float(amount[i,j]/count[i,j]),'cell_count':int(count[i,j])})
++    return cells
++
++
++def _baffle_plenum_candidates(mesh,centroids,df,config=None):
++    """Physical plate openings first, native staircase cut pieces second.
++
++    Neither the count of disconnected cut pieces nor expected_hole_count
++    certifies the real holes. If wall boundaries cannot prove aperture identity,
++    retain the full cut and diagnostics but omit hole count/CV.
+     """
+     import numpy as np
++    from af_baffle_openings import find_planar_openings, match_flux_components
+     xyz=mesh['xyz'];tri=_horizontal_wall_triangles(mesh)
+-    extent=np.linalg.norm(np.ptp(xyz,axis=0));tol=max(2e-8,extent*2e-7)
++    extent=float(np.linalg.norm(np.ptp(xyz,axis=0)))
++    tol=max(2e-8,extent*2e-7)
++    diagnostics={'horizontal_wall_triangle_count':len(tri)}
+     if len(tri)<15:
+-        return {'status':'not_identified','reason':'Too few Y-planar wall faces'}
+-    planes=tri;cent=planes.mean(axis=1)
+-    area=np.linalg.norm(np.cross(planes[:,1]-planes[:,0],planes[:,2]-planes[:,0]),axis=1)/2
++        return {'status':'not_identified','reason':'Too few Y-planar wall faces','diagnostics':diagnostics}
++    centers=tri.mean(axis=1)
++    area=np.linalg.norm(np.cross(tri[:,1]-tri[:,0],tri[:,2]-tri[:,0]),axis=1)*.5
+     from af_adaptive_geometry import _station_groups
+-    ys,areas=_station_groups(cent[:,1],area,tol)
+-    if len(ys)<3:return {'status':'not_identified','reason':'Fewer than three horizontal wall planes'}
+-    # Broad horizontal surfaces, relative to actual mesh, identify floor and
+-    # the two faces of a thin baffle. Do not use an absolute 0.1 m² threshold.
++    ys,areas=_station_groups(centers[:,1],area,tol)
++    diagnostics['horizontal_wall_stations']=[{'y_m':float(y),'wall_area_m2':float(a)} for y,a in zip(ys,areas)]
++    if len(ys)<3:
++        return {'status':'not_identified','reason':'Fewer than three horizontal wall planes','diagnostics':diagnostics}
+     significant=areas>=max(float(np.max(areas))*.08,float(np.median(areas))*.8)
+-    pos=np.sort(ys[significant])
+-    if len(pos)<3:
+-        return {'status':'not_identified','reason':'No three large horizontal wall stations'}
+-    choices=[]
++    pos=np.sort(ys[significant]);candidates=[]
++    bound=(config or {}).get('measurement',{}).get('baffle_y_range_m')
+     for j in range(1,len(pos)-1):
+-        gap_below=pos[j]-pos[j-1]; thickness=pos[j+1]-pos[j]
+-        if thickness>0 and gap_below/thickness>=3.0:
+-            choices.append((gap_below/thickness,j))
+-    if not choices:
+-        return {'status':'not_identified','reason':'Cannot infer floor and thin baffle face pair'}
+-    _,j=max(choices)
+-    floor,low,high=map(float,pos[j-1:j+2])
+-    ycut=(low+high)/2
+-    layer={'y_cut_m':ycut,'rows':[]}
++        floor,low,high=map(float,pos[j-1:j+2])
++        gap=low-floor;thick=high-low
++        if thick<=0 or gap/thick<3:continue
++        selected=(bound is None or (bound[0]<=low and high<=bound[1]))
++        candidates.append({'floor_y_m':floor,'lower_y_m':low,'upper_y_m':high,
++                           'thickness_m':thick,'lower_clearance_m':gap,
++                           'clearance_thickness_ratio':gap/thick,'selected_by_config':bool(selected)})
++    diagnostics['plate_candidates']=candidates
++    eligible=[c for c in candidates if c['selected_by_config']]
++    if not eligible:
++        return {'status':'not_identified','reason':'No plate-floor pair matches geometry constraints',
++                'diagnostics':diagnostics}
++    if len(eligible)>1:
++        return {'status':'plate_candidate_ambiguous',
++                'reason':'Multiple plausible plate face pairs; narrow measurement.baffle_y_range_m',
++                'diagnostics':diagnostics}
++    chosen=eligible[0]
++    floor,low,high=chosen['floor_y_m'],chosen['lower_y_m'],chosen['upper_y_m']
++    cut=(low+high)*.5
++    face_a=find_planar_openings(tri,low,tol)
++    face_b=find_planar_openings(tri,high,tol)
++    diagnostics['lower_wall_contours']={k:v for k,v in face_a.items() if k not in ('openings','outers')}
++    diagnostics['upper_wall_contours']={k:v for k,v in face_b.items() if k not in ('openings','outers')}
++    opening_pair_ok=face_a['status']=='closed_contours' and face_b['status']=='closed_contours'
++    opening_reason=''
++    if opening_pair_ok:
++        lower=face_a['openings'];upper=face_b['openings']
++        opening_pair_ok=len(lower)==len(upper)
++        if not opening_pair_ok:opening_reason='Upper/lower plate aperture outline counts differ'
++        else:
++            for hole_a,hole_b in zip(lower,upper):
++                x,z=hole_a['center_xz_m'];xx,zz=hole_b['center_xz_m']
++                w=hole_a['bbox_xz_m'][1]-hole_a['bbox_xz_m'][0]
++                h=hole_a['bbox_xz_m'][3]-hole_a['bbox_xz_m'][2]
++                if abs(x-xx)>max(tol*8,w*.15) or abs(z-zz)>max(tol*8,h*.15):
++                    opening_pair_ok=False;opening_reason='Upper/lower hole centers do not correspond';break
++    else:
++        opening_reason='Plate face aperture outlines unverified: lower=%s, upper=%s'%(face_a['status'],face_b['status'])
+     inside=mesh['inside'];owner=mesh['owner'][inside];other=mesh['neighbors']
+-    below=centroids[:,1]<ycut
++    below=centroids[:,1]<cut
+     across=below[owner]!=below[other]
+     faces=inside[across]
+-    if not len(faces):return {'status':'not_identified','reason':'No internal face cut at candidate baffle'}
+-    flux=mesh['flux'][faces]*np.where(below[other[across]],1,-1)
++    if not len(faces):
++        return {'status':'hole_outline_unverified','reason':'No native internal face crossing selected plate',
++                'cut_height_m':cut,'diagnostics':diagnostics}
++    signed=mesh['flux'][faces]*np.where(below[other[across]],1,-1)
++    full_flux=float(signed.sum(dtype=np.float64))
+     face_vertices=mesh['conn'][faces]
+-    # Connected components by identical mesh node ID: no coordinate snapping.
+-    parent=np.arange(len(faces),dtype=np.int32)
++    # These are *integration fragments* only. They are NOT counted as holes.
++    parents=np.arange(len(faces),dtype=np.int32)
+     def find(i):
+-        while parent[i]!=i:
+-            parent[i]=parent[parent[i]];i=parent[i]
++        while parents[i]!=i:
++            parents[i]=parents[parents[i]];i=int(parents[i])
+         return int(i)
+-    seen={}
+-    for i,ids in enumerate(face_vertices):
+-        for nid in ids:
+-            v=int(nid)
+-            if v in seen:
+-                a,b=find(i),find(seen[v]);parent[a]=b
+-            else:seen[v]=i
++    shared={}
++    for i,nodes in enumerate(face_vertices):
++        for node in nodes:
++            node=int(node)
++            prev=shared.get(node)
++            if prev is not None:
++                parents[find(i)]=find(prev)
++            else:shared[node]=i
+     components={}
+     for i in range(len(faces)):
+         components.setdefault(find(i),[]).append(i)
+-    if len(components)<3 or len(components)>6000:
+-        return {'status':'not_identified','reason':'Candidate baffle cut is not multiple disconnected holes',
+-                'component_count':len(components)}
+-    holes=[]
+-    for rows in components.values():
+-        ids=np.asarray(rows,dtype=np.int64)
+-        verts=xyz[face_vertices[ids]].reshape(-1,3)
+-        span=np.ptp(verts,axis=0)
+-        if len(ids)<1 or np.any(span[[0,2]]<=0):
+-            return {'status':'not_identified','reason':'Degenerate baffle section component'}
+-        v=flux[ids]
+-        holes.append({'center_m':verts.mean(axis=0).tolist(),
+-                      'width_x_m':float(span[0]),'width_z_m':float(span[2]),
+-                      'face_count':len(ids),'net_kg_s':float(v.sum()),
+-                      'positive_kg_s':float(v[v>0].sum()),
+-                      'negative_magnitude_kg_s':float(-v[v<0].sum())})
+-    sizes=np.array([max(p['width_x_m'],p['width_z_m']) for p in holes])
+-    typical=float(np.median(sizes))
+-    if typical<=0 or np.any(sizes<typical*.4):
+-        return {'status':'not_identified','reason':'Baffle cut components have unresolved tiny passages'}
+-    # Large connected components are candidate perimeter paths, NOT holes;
+-    # preserve their measured flux separately and certify complete closure.
+-    edge_components=[p for p,size in zip(holes,sizes) if size>typical*3.5]
+-    holes=[p for p,size in zip(holes,sizes) if size<=typical*3.5]
+-    if len(holes)<3:
+-        return {'status':'not_identified','reason':'Too few uniformly sized hole components after separating edge paths'}
+-    holes.sort(key=lambda r:r['center_m'][2])
+-    groups=[]
+-    for h in holes:
+-        if not groups or h['center_m'][2]-groups[-1][-1]['center_m'][2] > typical*.75:
+-            groups.append([])
+-        groups[-1].append(h)
+-    if abs(sum(h['net_kg_s'] for h in holes+edge_components)-float(flux.sum()))>max(1e-12,abs(flux.sum())*1e-8):
+-        raise UnsupportedCFF('Candidate hole flux components fail cut closure')
+-    per_row=[]
+-    for i,group in enumerate(groups,1):
+-        net=np.array([h['net_kg_s'] for h in group]);mean=float(net.mean())
+-        per_row.append({'index':i,'hole_count':len(group),
+-                        'net_kg_s':float(net.sum()),
+-                        'cv_pct':100*float(net.std())/abs(mean) if abs(mean)>1e-30 else None})
+-    res={'status':'geometry_candidate_holes_native_flux_computed',
+-         'floor_y_m':floor,'baffle_lower_y_m':low,'baffle_upper_y_m':high,
+-         'cut_height_m':ycut,'hole_count':len(holes),'hole_row_count':len(groups),
+-         'holes':holes,'rows':per_row,
+-         'total_hole_net_kg_s':float(sum(x['net_kg_s'] for x in holes)),
+-         'board_edge_components':edge_components,
+-         'board_edge_net_kg_s':float(sum(x['net_kg_s'] for x in edge_components)),
+-         'edge_path_status':'candidate_spatially_separate' if edge_components else 'not_identified',
+-         'board_cut_closure_error_kg_s':float(sum(x['net_kg_s'] for x in holes+edge_components)-float(flux.sum())),
+-         'all_hole_cv_pct':100*float(np.std([x['net_kg_s'] for x in holes]))/abs(float(np.mean([x['net_kg_s'] for x in holes]))) if abs(np.mean([x['net_kg_s'] for x in holes]))>1e-30 else None,
+-         'note':'Baffle recognized from horizontal area stations and disjoint native-face components, independent review required'}
+-    # Only fetch the selected plenum cell pressure samples, never an entire
+-    # multi-million-cell SV_P array while generating a baffle figure.
++    fragments=[]
++    for ids in components.values():
++        ids=np.asarray(ids,dtype=np.int64)
++        vertices=xyz[face_vertices[ids]].reshape(-1,3)
++        span=np.ptp(vertices,axis=0)
++        flux=signed[ids]
++        fragments.append({'center_m':np.mean(vertices,axis=0).tolist(),
++                          'width_x_m':float(span[0]),'width_z_m':float(span[2]),
++                          'face_count':len(ids),'net_kg_s':float(flux.sum()),
++                          'positive_kg_s':float(flux[flux>0].sum()),
++                          'negative_magnitude_kg_s':float(-flux[flux<0].sum())})
++    diagnostics['cut_integration_piece_count']=len(fragments)
++    data={'status':'hole_outline_unverified','reason':opening_reason,
++          'floor_y_m':floor,'baffle_lower_y_m':low,'baffle_upper_y_m':high,
++          'cut_height_m':cut,'whole_cut_net_kg_s':full_flux,
++          'candidate_integral_component_count':len(fragments),
++          'diagnostics':diagnostics}
++    if opening_pair_ok:
++        matched=match_flux_components(face_a['openings'],face_a['outers'],fragments,
++                                      full_cut_net_kg_s=full_flux,tolerance=tol*4)
++        data.update({'mapping':matched,'board_cut_closure_error_kg_s':matched['closure_error_kg_s'],
++                     'board_edge_net_kg_s':matched['edge_net_kg_s'],
++                     'unassigned_net_kg_s':matched['unassigned_net_kg_s'],
++                     'unassigned_components':matched['unassigned_components'],
++                     'board_edge_components':matched['board_edge_components']})
++        if matched['status']=='verified_openings':
++            holes=[]
++            for r in matched['holes']:
++                x,z=r['center_xz_m'];a,b,c,d=r['bbox_xz_m']
++                holes.append({'hole_id':r['hole_id'],'center_m':[x,cut,z],
++                              'width_x_m':b-a,'width_z_m':d-c,
++                              'face_count':r['face_count'],'integration_component_ids':r['component_ids'],
++                              'net_kg_s':r['net_kg_s'],'positive_kg_s':r['positive_kg_s'],
++                              'negative_magnitude_kg_s':r['negative_magnitude_kg_s']})
++            # Group physical holes by spatial Z, never by fragment count.
++            heights=np.asarray([h['width_z_m'] for h in holes]);spacing=float(np.median(heights))
++            groups=[]
++            for h in sorted(holes,key=lambda x:x['center_m'][2]):
++                if not groups or h['center_m'][2]-groups[-1][-1]['center_m'][2]>spacing*.75:
++                    groups.append([])
++                groups[-1].append(h)
++            rows=[]
++            for index,group in enumerate(groups,1):
++                flow=np.asarray([h['net_kg_s'] for h in group]);mean=float(flow.mean())
++                rows.append({'index':index,'hole_count':len(group),'net_kg_s':float(flow.sum()),
++                             'cv_pct':float(flow.std()/abs(mean)*100) if abs(mean)>1e-30 else None})
++            net=np.asarray([h['net_kg_s'] for h in holes]);mean=float(net.mean())
++            data.update({'status':'geometry_candidate_holes_native_flux_computed','reason':'',
++                         'hole_count':len(holes),'hole_row_count':len(groups),
++                         'holes':holes,'rows':rows,
++                         'total_hole_net_kg_s':matched['hole_net_kg_s'],
++                         'edge_path_status':'mapped_outside_verified_plate_outline' if matched['board_edge_components'] else 'not_identified',
++                         'all_hole_cv_pct':float(net.std()/abs(mean)*100) if abs(mean)>1e-30 else None,
++                         'verification':'matched physical closed aperture loops on both plate walls to native flux pieces'})
++        else:data['reason']='One or more integral pieces cannot be assigned to exactly one physical aperture; no certified hole CV'
++    # A valid pressure sample can be independent of failed aperture matching.
+     try:
+         cell_data=df.get('results/%s/%s/cells/SV_P'%(mesh['result_group'],mesh['phase_group']))
+         if cell_data is not None:
+-            cmask=(centroids[1:,1]>floor)&(centroids[1:,1]<low)
+-            cell_ids=np.flatnonzero(cmask)
++            cell_ids=np.flatnonzero((centroids[1:,1]>floor)&(centroids[1:,1]<low))
+             if len(cell_ids)>20:
+                 vals=_subset_field({'SV_P':cell_data},'SV_P',cell_ids,mesh['nc'])
+                 if vals is not None:
+-                    res['lower_plenum_static_pressure_pa']={
+-                        'cell_count':int(len(vals)),
+-                        'min':float(vals.min()),'max':float(vals.max()),
+-                        'range':float(np.ptp(vals)), 'unweighted_mean':float(vals.mean())}
+-    except (KeyError,TypeError,ValueError,OSError):
+-        pass
+-    return res
++                    data['lower_plenum_static_pressure_pa']={
++                        'cell_count':int(len(vals)),'min':float(vals.min()),
++                        'max':float(vals.max()),'range':float(np.ptp(vals)),
++                        'unweighted_mean':float(vals.mean()),
++                        'sample_type':'unweighted tetra cell-centred static pressure',
++                        'xz_bins':_plenum_xz_pressure_bins(centroids[cell_ids+1],vals)}
++    except (KeyError,TypeError,ValueError,OSError):pass
++    return data
+--- a/worker/af_baffle_openings.py
++++ b/worker/af_baffle_openings.py
+@@ -0,0 +1,142 @@
++# -*- coding: utf-8 -*-
++"""Geometry-first planar baffle openings, independent from staircase flux pieces.
++
++Only an explicitly closed ring of wall-face boundary edges can represent an
++opening. A connected cut component never, by itself, certifies a physical hole.
++Topology mismatch is diagnostic; unassigned face flux is retained for closure.
++"""
++from collections import Counter, defaultdict
++import numpy as np
++
++
++def _inside(point, polygon):
++    x,z=map(float,point); ring=np.asarray(polygon, dtype=float)
++    result=False
++    for (x0,z0),(x1,z1) in zip(ring,np.roll(ring,-1,axis=0)):
++        if (z0>z)!=(z1>z) and x<(x1-x0)*(z-z0)/(z1-z0)+x0:
++            result=not result
++    return result
++
++
++def _ring_area(points):
++    p=np.asarray(points,dtype=float)
++    return float(.5*np.sum(p[:,0]*np.roll(p[:,1],-1)-np.roll(p[:,0],-1)*p[:,1]))
++
++
++def find_planar_openings(triangles, y_m, tol, *, max_triangles=650000):
++    """Closed coplanar plate wall boundaries; odd-depth rings are apertures."""
++    tris=np.asarray(triangles,dtype=float)
++    keep=(np.ptp(tris[:,:,1],axis=1)<=tol)&(np.abs(tris[:,:,1].mean(axis=1)-y_m)<=tol*2)
++    tris=tris[keep]
++    diag={'plane_y_m':float(y_m),'plane_triangle_count':int(len(tris))}
++    if len(tris)<4:
++        return {'status':'not_identified','reason':'Insufficient coplanar plate wall triangles', 'diagnostics':diag}
++    if len(tris)>max_triangles:
++        return {'status':'resource_limit','reason':'Selected plate exceeds safe planar contour budget', 'diagnostics':diag}
++    yz=np.rint(tris[:,:,[0,2]].reshape(-1,2)/tol).astype(np.int64)
++    unique,ids=np.unique(yz,axis=0,return_inverse=True)
++    edge_count=Counter()
++    for row in ids.reshape(-1,3):
++        for a,b in ((0,1),(1,2),(2,0)):
++            u,v=sorted((int(row[a]),int(row[b])))
++            if u!=v:edge_count[(u,v)]+=1
++    if any(v>2 for v in edge_count.values()):
++        return {'status':'ambiguous','reason':'Non-manifold plate plane edge', 'diagnostics':diag}
++    borders=[e for e,n in edge_count.items() if n==1]
++    graph=defaultdict(set)
++    for a,b in borders:graph[a].add(b);graph[b].add(a)
++    diag['boundary_edge_count']=len(borders)
++    if not borders or any(len(n)!=2 for n in graph.values()):
++        return {'status':'ambiguous','reason':'Plate wall has open or branched contour; hole boundaries unverified', 'diagnostics':diag}
++    unused=set(borders);rings=[]
++    while unused:
++        a,b=next(iter(unused));ring=[a];prev=a;curr=b
++        unused.remove((min(a,b),max(a,b)))
++        for _ in range(len(graph)+1):
++            if curr==a:break
++            ring.append(curr)
++            nxt=next((j for j in graph[curr] if j!=prev),None)
++            if nxt is None:break
++            edge=(min(curr,nxt),max(curr,nxt))
++            if edge not in unused:break
++            unused.remove(edge);prev,curr=curr,nxt
++        if curr!=a:
++            return {'status':'ambiguous','reason':'Incomplete plate boundary ring', 'diagnostics':diag}
++        polygon=unique[np.asarray(ring,dtype=int)].astype(float)*tol
++        if abs(_ring_area(polygon))>tol*tol*10:rings.append(polygon)
++    if not rings:
++        return {'status':'not_identified','reason':'No closed plate ring contours','diagnostics':diag}
++    # A ring is an aperture if it is inside exactly one solid outer contour.
++    areas=[abs(_ring_area(r)) for r in rings]
++    openings=[];outers=[];depths=[]
++    for i,polygon in enumerate(rings):
++        p=polygon[0]
++        depth=sum(_inside(p,other) for j,other in enumerate(rings)
++                  if j!=i and areas[j]>areas[i])
++        depths.append(depth)
++        box=[float(polygon[:,0].min()),float(polygon[:,0].max()),
++             float(polygon[:,1].min()),float(polygon[:,1].max())]
++        record={'outline_xz_m':polygon.tolist(),'bbox_xz_m':box,
++                'center_xz_m':[(box[0]+box[1])*.5,(box[2]+box[3])*.5],
++                'boundary_area_m2':float(areas[i])}
++        if depth==1:openings.append(record)
++        elif depth==0:outers.append(record)
++    openings.sort(key=lambda r:(r['center_xz_m'][1],r['center_xz_m'][0]))
++    for i,h in enumerate(openings,1):h['hole_id']=f'H{i:04d}'
++    diag.update(boundary_ring_count=len(rings),outer_loop_count=len(outers),
++                opening_loop_count=len(openings),nested_ring_depths=depths)
++    if not openings or not outers:
++        return {'status':'not_identified','reason':'Cannot confirm both plate exterior and enclosed aperture rings',
++                'openings':openings,'outers':outers,'diagnostics':diag}
++    return {'status':'closed_contours','openings':openings,'outers':outers,'diagnostics':diag}
++
++
++def match_flux_components(openings,outers,components, *, full_cut_net_kg_s, tolerance=1e-9):
++    """Map each integral piece to exactly one physical aperture or else retain it.
++
++    Coordinates are observations of the native staircase faces; rectangular
++    bounds are a conservative first test, not a replacement for wall outlines.
++    """
++    holes=[{**h,'component_ids':[],'net_kg_s':0.,'positive_kg_s':0.,
++            'negative_magnitude_kg_s':0.,'face_count':0} for h in openings]
++    edge=[];unassigned=[]
++    for i,component in enumerate(components):
++        p=component['center_m'];x,z=float(p[0]),float(p[2])
++        cx0,cx1=x-component['width_x_m']/2,x+component['width_x_m']/2
++        cz0,cz1=z-component['width_z_m']/2,z+component['width_z_m']/2
++        possible=[]
++        for j,h in enumerate(holes):
++            a,b,c,d=h['bbox_xz_m']
++            if (a-tolerance<=x<=b+tolerance and c-tolerance<=z<=d+tolerance and
++                    cx0>=a-max(tolerance,(b-a)*.16) and cx1<=b+max(tolerance,(b-a)*.16) and
++                    cz0>=c-max(tolerance,(d-c)*.16) and cz1<=d+max(tolerance,(d-c)*.16)):
++                possible.append(j)
++        entry={**component,'component_index':i+1}
++        if len(possible)==1:
++            hole=holes[possible[0]];hole['component_ids'].append(i+1)
++            for key in ('net_kg_s','positive_kg_s','negative_magnitude_kg_s'):
++                hole[key]+=float(component.get(key,0.))
++            hole['face_count']+=int(component.get('face_count',0))
++        elif len(possible)>1:
++            entry['reason']='component_overlaps_multiple_apertures';unassigned.append(entry)
++        elif any(_inside((x,z),ring['outline_xz_m']) for ring in outers):
++            entry['reason']='inside_plate_but_no_verified_opening';unassigned.append(entry)
++        else:
++            entry['reason']='outside_verified_plate_outline';edge.append(entry)
++    from math import fsum
++    assigned=fsum(float(h['net_kg_s']) for h in holes)
++    edge_net=fsum(float(h['net_kg_s']) for h in edge)
++    unmatched=fsum(float(h['net_kg_s']) for h in unassigned)
++    closure=assigned+edge_net+unmatched-float(full_cut_net_kg_s)
++    verified=(all(h['component_ids'] for h in holes) and not unassigned and
++              abs(closure)<=max(1e-12,abs(full_cut_net_kg_s)*1e-8))
++    return {'status':'verified_openings' if verified else 'candidate_unverified',
++            'holes':holes,'board_edge_components':edge,'unassigned_components':unassigned,
++            'whole_cut_net_kg_s':float(full_cut_net_kg_s),
++            'hole_net_kg_s':assigned,'edge_net_kg_s':edge_net,
++            'unassigned_net_kg_s':unmatched,'closure_error_kg_s':closure,
++            'diagnostics':{'verified_hole_count':len(holes) if verified else None,
++                           'opening_contour_count':len(holes),
++                           'integral_piece_count':len(components),
++                           'unassigned_piece_count':len(unassigned),
++                           'split_piece_hole_count':sum(len(h['component_ids'])>1 for h in holes)}}
+--- a/worker/af_common_cut_compare.py
++++ b/worker/af_common_cut_compare.py
+@@ -0,0 +1,135 @@
++# -*- coding: utf-8 -*-
++"""Recalculate two independently saved CFF solutions on one explicit cut config.
++
++This is a real recalculation, not subtraction of mismatched prior reports.
++Unverified boundary conditions/convergence keep all conclusions provisional.
++"""
++import argparse
++from html import escape
++import json
++from pathlib import Path
++import uuid
++
++
++def compare_saved_pairs_common_cut(before_file, after_file, config, *, before_data=None, after_data=None):
++    from af_pairing import resolve_saved_pair
++    from af_adaptive_native import analyze_saved_pair
++    from af_adaptive_compare import compare_native_saved
++    from af_model_config import validate_model_config
++    from af_report_v3 import _fmt
++    validate_model_config(config)
++    # Explicit cut coordinates ensure both jobs use the SAME physical Y section;
++    # other geometry signatures also need to match before declaring comparability.
++    missing=[x['id'] for x in config['layers'] if x.get('cut_y_m') is None]
++    if missing:
++        raise ValueError('Common-cut recomputation requires explicit cut_y_m for each layer: '+', '.join(missing))
++    ca,da=resolve_saved_pair(before_file,explicit_data=before_data)
++    cb,db=resolve_saved_pair(after_file,explicit_data=after_data)
++    if ca==cb and da==db:
++        raise ValueError('Before and after resolve to exactly the same Case/Data snapshot')
++    from af_progress import set_scope, update
++    set_scope(0, 45)
++    update(1,'对比计算 A','同一配置下读取第一份 Case/Data，计算原生分区')
++    try:
++        before=analyze_saved_pair(ca,da,config=config)
++        set_scope(45,90)
++        update(1,'对比计算 B','同一配置下读取第二份 Case/Data，计算原生分区')
++        after=analyze_saved_pair(cb,db,config=config)
++    finally:
++        set_scope(0, 100)
++    update(91,'同口径检查','按指标核对实测截面、通道、端口和守恒')
++    comparison=compare_native_saved(before,after)
++    # Geometry detection is a prerequisite for measured wafer metrics, but
++    # port pressure can still be independently compared when wafer pairing fails.
++    comparable=bool(comparison['same_cut_candidate'])
++    measured_layers={}
++    for label in sorted(set(before.get('layers',{}))|set(after.get('layers',{}))):
++        first=before.get('layers',{}).get(label,{})
++        second=after.get('layers',{}).get(label,{})
++        measured_layers[label]={
++            'cut_y_m':[first.get('cut_height_m'),second.get('cut_height_m')],
++            'net_kg_s':[first.get('net_kg_s'),second.get('net_kg_s')],
++            'share_inlet_pct':[first.get('share_inlet_pct'),second.get('share_inlet_pct')],
++            'cv_pct':[first.get('cv_pct'),second.get('cv_pct')],
++            'wafer_metric_difference_allowed':comparable and label in comparison.get('layers',{})
++        }
++    shared_spec={
++        'axis':config['axis'],
++        'layers':[{'id':x['id'],'cut_y_m':x['cut_y_m'],
++                   'rows':[{'id':r['id'],'z_range_m':r['z_range_m']} for r in x['rows']]}
++                  for x in config['layers']],
++        'partition':config.get('partition',{}),
++        'ports':config['ports'],
++        'wafer_thickness_range_m':config['wafer']['thickness_range_m'],
++        'regular_gap_range_m':config['wafer']['regular_gap_range_m']}
++    status=('recomputed_same_cut_candidate_not_final_qualified' if comparable else
++            'recomputed_but_layout_or_physics_not_comparable')
++    update(95,'共同截面结果已生成','仍需人工核验实际工况、收敛和网格策略')
++    return {'schema':'autofluent.common_cut_recomputed.v1','status':status,
++            'input_paths':{'before':{'case':str(ca),'data':str(da)},
++                           'after':{'case':str(cb),'data':str(db)}},
++            'shared_measurement_config':shared_spec,
++            'each_result_status':[before.get('status'),after.get('status')],
++            'observations_by_layer':measured_layers,
++            'comparison':comparison,
++            'source_results':{'before':before,'after':after},
++            'limitations':['Both saved solutions were recomputed independently with a shared config',
++                           'A matching config cannot prove identical physical conditions or convergence',
++                           'Wafer difference remains blocked if measured geometry/layout is inconsistent',
++                           'Results are candidate observations only; not an automatically qualified design ranking']}
++
++
++def render_common_cut_html(result):
++    """Single-file preview of both actual calculated snapshots, no external assets."""
++    from af_report_v3 import STYLE, _fmt
++    e=lambda x:escape(str(x),quote=True)
++    cmp=result['comparison']
++    rows=[]
++    for key,r in result['observations_by_layer'].items():
++        cr=cmp.get('layers',{}).get(key,{})
++        rows.append('<tr>'+''.join('<td>%s</td>'%e(v) for v in (
++            key,_fmt(r['cut_y_m'][0]),_fmt(r['cut_y_m'][1]),
++            _fmt(r['share_inlet_pct'][0]),_fmt(r['share_inlet_pct'][1]),
++            _fmt(cr.get('fraction_delta_pp')) if r['wafer_metric_difference_allowed'] else '不可比较',
++            _fmt(r['cv_pct'][0]),_fmt(r['cv_pct'][1]),
++            _fmt(cr.get('cv_delta_pp')) if r['wafer_metric_difference_allowed'] else '不可比较'))+'</tr>')
++    reasons=''.join('<p class="small">• %s</p>'%e(x) for x in cmp.get('reasons',[]))
++    p=cmp.get('pressure_drop_pa',[None,None])
++    pd=cmp.get('pressure_drop_delta_pa')
++    details=e(json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False))
++    return ('''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoFluent · 统一截面复算</title>
++<style>'''+STYLE+'''</style><body><main><header><p class="eyebrow">AutoFluent / 离线同口径对比</p><h1>仿真结果与结构优化</h1><p>两份 Fluent 保存解重新计算；未验证求解收敛和全部工况，因此只给出候选观测值。</p>
++<p>状态：'''+e(result['status'])+'''</p></header><section><h2>共同截面与晶圆指标</h2><div class="scroll"><table><tr><th>层</th><th>前截面 Y(m)</th><th>后截面 Y(m)</th><th>前片间 %</th><th>后片间 %</th><th>变化 pp</th><th>前 CV%</th><th>后 CV%</th><th>变化 pp</th></tr>'''+''.join(rows)+'''</table></div>
++<p class="small">仅相同实测通道 X 边界、Z 分区与测量位置等口径通过检查时展示差值。</p></section><section><h2>端口总压降</h2>
++<p>前：'''+_fmt(p[0])+''' Pa；后：'''+_fmt(p[1])+''' Pa；候选差值：'''+(_fmt(pd)+' Pa' if pd is not None else '不可比较')+'''。</p><p class="small">端口比较不以晶圆截面是否相同作为单独阻断条件；仍须检查压力定义、工况与收敛。</p></section>
++<section><h2>可信度与限制</h2>'''+reasons+'''</section><section><h2>来源与完整明细</h2><details><summary>两份重新计算的完整结构化结果（展开）</summary><pre>'''+details+'''</pre></details></section></main></body></html>''')
++
++
++def main():
++    p=argparse.ArgumentParser(description='Recalculate two real CFF saves on one explicit geometry cut')
++    p.add_argument('--before',required=True,help='Before .cas.h5 or .dat.h5')
++    p.add_argument('--after',required=True,help='After .cas.h5 or .dat.h5')
++    p.add_argument('--before-data',default=None)
++    p.add_argument('--after-data',default=None)
++    p.add_argument('--config',required=True)
++    p.add_argument('--output-dir',required=True)
++    a=p.parse_args()
++    try:
++        from af_model_config import load_model_config
++        r=compare_saved_pairs_common_cut(a.before,a.after,load_model_config(a.config),
++            before_data=a.before_data,after_data=a.after_data)
++        folder=Path(a.output_dir).expanduser().resolve();folder.mkdir(parents=True,exist_ok=True)
++        name='common_cut_'+uuid.uuid4().hex[:10]
++        jp=folder/(name+'.json');hp=folder/(name+'.html')
++        with jp.open('x',encoding='utf-8') as f:json.dump(r,f,ensure_ascii=False,indent=2,allow_nan=False)
++        with hp.open('x',encoding='utf-8') as f:f.write(render_common_cut_html(r))
++        from af_progress import update
++        update(100,'统一截面对比输出完成','真实数据已重新计算，仍未独立认证收敛',force=True)
++        print(json.dumps({'status':r['status'],'same_cut_candidate':r['comparison']['same_cut_candidate'],
++            'json_file':str(jp),'html_file':str(hp),'warning':'Real model acceptance and convergence still pending'},ensure_ascii=False))
++    except Exception as exc:
++        print(json.dumps({'status':'error','stage':'common_cut_recomputation',
++                          'reason':str(exc)[:650]},ensure_ascii=False))
++        raise SystemExit(1)
++
++if __name__=='__main__':main()
+--- a/worker/af_geometry_precheck.py
++++ b/worker/af_geometry_precheck.py
+@@ -0,0 +1,142 @@
++# -*- coding: utf-8 -*-
++"""Case-only physical geometry preflight, without loading solution fields.
++
++Runs the same connected-patch wafer recognizer as the physical engine, but
++streams wall-zone face/node connectivity and never allocates an all-faces map.
++A valid config is not itself a valid geometry preflight.
++"""
++from pathlib import Path
++import json
++
++
++def precheck_case_geometry(case_path, *, config=None, max_candidate_triangles=1_500_000,
++                           memory_budget_mb=3072):
++    import h5py
++    import numpy as np
++    from af_progress import update as progress
++    progress(8,'模型几何预检','仅打开 Case，不读取 Data 物理场')
++    from af_adaptive_native import (_indexed_datasets, _face_node_blocks,
++                                    _face_zones, UnsupportedCFF)
++    from af_adaptive_geometry import (identify_from_configured_wall_triangles,
++                                      identify_from_wall_triangles, GeometryAmbiguous)
++    case=Path(case_path).expanduser().resolve()
++    if not 512 <= memory_budget_mb <= 16384:
++        raise ValueError('Geometry precheck budget must be 512..16384 MiB')
++    report={'schema':'autofluent.geometry_case_precheck.v1',
++            'case_path':str(case), 'mode':'configured' if config else 'automatic',
++            'status':'blocked', 'geometry':None,
++            'note':'Case-only wall geometry; no SV_FLUX, flow, pressure, convergence or physical partition is certified'}
++    try:
++        with h5py.File(case,'r') as cf:
++            if 'meshes' not in cf or len(cf['meshes'])!=1:
++                raise UnsupportedCFF('Geometry precheck supports a single CFF mesh only')
++            mesh=next(iter(cf['meshes'].values()))
++            if 'nodes/coords' not in mesh or 'faces/c0' not in mesh:
++                raise UnsupportedCFF('Case lacks node coordinates or authoritative face count')
++            nodes=_indexed_datasets(mesh['nodes/coords'],context='nodes/coords')
++            nf=_indexed_datasets(mesh['faces/c0'],context='faces/c0')[-1][1]
++            node_count=nodes[-1][1]
++            zones=_face_zones(mesh,nf)
++            wall_ranges=[(name,a,b) for name,a,b in zones if 'wall' in name.lower() or '壁' in name]
++            report.update(mesh_faces=int(nf),node_count=int(node_count),
++                          wall_zone_ranges=[{'zone':n,'face_count':int(b-a)} for n,a,b in wall_ranges],
++                          named_zones=[{'name':n,'face_count':int(b-a)} for n,a,b in zones])
++            if not wall_ranges:
++                raise UnsupportedCFF('No explicit wall face zones; cannot reliably infer wafer candidates from Case alone')
++            node_bytes=node_count*3*8
++            estimate=node_bytes+max_candidate_triangles*3*3*8*1.6+256*1024**2
++            if estimate>memory_budget_mb*1024**2:
++                raise UnsupportedCFF('Geometry precheck estimate %.2f GiB exceeds budget %.2f GiB; nodes=%d, candidate_cap=%d'
++                                     %(estimate/1024**3,memory_budget_mb/1024,node_count,max_candidate_triangles))
++            progress(20,'实际网格坐标','检查节点区间并读取必要坐标')
++            xyz=np.empty((node_count,3),np.float64)
++            for lo,hi,ds in nodes:
++                for a in range(lo,hi,131072):
++                    b=min(a+131072,hi)
++                    xyz[a:b]=ds[a-lo:b-lo]
++            if not np.isfinite(xyz).all():
++                raise UnsupportedCFF('Node coordinates contain NaN or infinity')
++            node_blocks=_face_node_blocks(mesh,nf)
++            tol=max(2e-8,float(np.linalg.norm(np.ptp(xyz,axis=0)))*2e-7)
++            bands=[(layer['y_range_m'],layer.get('wafer_x_range_m')) for layer in config['layers']] if config else []
++            progress(35,'壁面候选筛选','只扫描壁面区域及 X 法向真实面片')
++            candidates=[];total=0;scanned=0
++            # Only candidate wall regions, only their H5 slices; do not allocate the
++            # nfaces-by-3 face connectivity or all-face neighbour/flux vectors.
++            for zone_name,zone_lo,zone_hi in wall_ranges:
++                for blo,bhi,face_nodes,nnodes in node_blocks:
++                    start=max(zone_lo,blo);end=min(zone_hi,bhi)
++                    if start>=end:continue
++                    for a in range(start,end,32768):
++                        b=min(end,a+32768)
++                        offsets_a=a-blo;offsets_b=b-blo
++                        if not np.all(nnodes[offsets_a:offsets_b]==3):
++                            raise UnsupportedCFF('Nontriangular wall face at face %d'% (a+1))
++                        indices=np.asarray(face_nodes[3*offsets_a:3*offsets_b],np.int64)-1
++                        if np.any(indices<0) or np.any(indices>=node_count):
++                            raise UnsupportedCFF('Wall face/node index outside known mesh at face %d'%(a+1))
++                        pts=xyz[indices.reshape(-1,3)]; scanned+=len(pts)
++                        keep=np.ptp(pts[:,:,0],axis=1)<=tol
++                        if bands and np.any(keep):
++                            ctr=pts.mean(axis=1);spatial=np.zeros(len(ctr),dtype=bool)
++                            for (y0,y1),xr in bands:
++                                selected=(ctr[:,1]>=y0)&(ctr[:,1]<=y1)
++                                if xr is not None:selected &= (ctr[:,0]>=xr[0]-tol)&(ctr[:,0]<=xr[1]+tol)
++                                spatial |= selected
++                            keep &= spatial
++                        count=int(np.count_nonzero(keep))
++                        if total+count>max_candidate_triangles:
++                            raise UnsupportedCFF('X-normal wall candidates %d exceed precheck cap %d; tighten Y/X model search ranges'
++                                                 %(total+count,max_candidate_triangles))
++                        if count:candidates.append(pts[keep].copy());total+=count
++            report.update(scanned_wall_faces=int(scanned),x_normal_candidates=int(total))
++            if total<50:raise GeometryAmbiguous('Only %d candidate wafer wall triangles; check Case zones and wafer search bands'%total)
++            triangles=np.concatenate(candidates)
++            progress(75,'晶圆配对与分排','按几何连通、厚度和排对应判定真实片间通道')
++            geometry=(identify_from_configured_wall_triangles(triangles,config) if config else
++                      identify_from_wall_triangles(triangles))
++            report['geometry']=geometry
++            report['layers']=[{'id':layer.get('configured_id',layer['id']),
++                               'wafer_count':sum(int(row['plate_count']) for row in layer['rows']),
++                               'channel_count':int(layer['channels']),
++                               'cut_y_m':layer['y_cut_m'],
++                               'rows':[{'id':row.get('id'), 'wafer_count':int(row['plate_count']),
++                                        'regular_channel_count':len(row['regular_gap_index']),
++                                        'first_x_m':row['face_positions_lo_m'][0],
++                                        'last_x_m':row['face_positions_hi_m'][-1]}
++                                       for row in layer['rows']]}
++                              for layer in geometry['layers']]
++            report['status']='geometry_candidates_identified_requires_flux_validation'
++    except (OSError,KeyError,ValueError,IndexError,MemoryError) as exc:
++        report['blocker']={'stage':getattr(exc,'stage',None) or 'case_geometry_precheck',
++                           'type':type(exc).__name__,'reason':str(exc)[:800],
++                           'diagnostics':getattr(exc,'diagnostics',{})}
++    progress(100 if report['status']!='blocked' else 90,
++             'Case 几何预检完成' if report['status']!='blocked' else '晶圆壁面配对待复核',
++             report['status'],force=True)
++    return report
++
++
++def write_precheck_report(report, directory):
++    import html
++    import uuid
++    folder=Path(directory);folder.mkdir(parents=True,exist_ok=True)
++    name='geometry_precheck_'+uuid.uuid4().hex[:10]
++    jsonfile=folder/(name+'.json');htmlfile=folder/(name+'.html')
++    with jsonfile.open('x',encoding='utf-8') as f:json.dump(report,f,ensure_ascii=False,indent=2)
++    esc=lambda x:html.escape(str(x),quote=True)
++    rows=''.join('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>'%(
++        esc(row['id']),esc(row['wafer_count']),esc(row['channel_count']),esc(row['cut_y_m']))
++        for row in report.get('layers',[]))
++    page='''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Case 几何预检</title>
++    <style>body{font:15px/1.6 system-ui;max-width:950px;margin:35px auto;color:#193643}
++    header{background:#133644;color:white;padding:28px;border-radius:12px}section{background:#f1f5f7;padding:24px;border-radius:12px;margin:16px 0}
++    table{width:100%%;border-collapse:collapse}td,th{border-bottom:1px solid #ccc;padding:9px;text-align:left}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>
++    <header><h1>模型几何预检</h1><p>%s</p></header><section><p>Case：%s</p>
++    <p>扫描壁面 %s；X 法向候选 %s</p><p>此报告不包含求解流量或压力，不等于完整物理分析。</p></section>
++    <section><h2>分层分排</h2><table><tr><th>层</th><th>片数</th><th>通道</th><th>Y 截面 (m)</th></tr>%s</table></section>
++    <section><h2>检查详情</h2><pre>%s</pre></section></html>'''%(
++        esc(report['status']),esc(report['case_path']),esc(report.get('scanned_wall_faces','未取得')),
++        esc(report.get('x_normal_candidates','未取得')),rows,esc(json.dumps(report,ensure_ascii=False,indent=2)))
++    with htmlfile.open('x',encoding='utf-8') as f:f.write(page)
++    return {'json_file':str(jsonfile),'html_file':str(htmlfile)}
+--- a/worker/af_h5_batch.py
++++ b/worker/af_h5_batch.py
+@@ -17,6 +17,11 @@
+ 
+ 
+ def discover_pairs(directory):
++    """Enumerate *each* saved Data snapshot, not one arbitrary Data per Case.
++
++    File-list mode uses the same authoritative Data settings/Case File lookup
++    as single-file mode, while retaining explicit errors for orphan files.
++    """
+     root = Path(directory).expanduser().resolve()
+     if not root.is_dir():
+         raise ValueError('请选择存在的工程目录')
+@@ -32,30 +37,31 @@
+         depth = len(folder.relative_to(root).parts)
+         dirs[:] = sorted(d for d in dirs if not d.startswith('.') and d.lower() not in
+                          ('node_modules', '__pycache__', 'build', 'dist', '.git'))
+-        if depth >= MAX_DEPTH:
+-            dirs[:] = []
+-        lookup = {n.casefold(): n for n in names}
+-        for name in sorted(names):
+-            if not name.casefold().endswith(CAS_SUFFIX):
+-                continue
++        if depth >= MAX_DEPTH: dirs[:] = []
++        dat_names=sorted(n for n in names if n.casefold().endswith(DAT_SUFFIX))
++        cas_names=sorted(n for n in names if n.casefold().endswith(CAS_SUFFIX))
++        paired_cases=set()
++        for name in dat_names:
++            data=folder/name
+             try:
+-                case = folder / name
+-                try:
+-                    resolved_case,data=resolve_pair(case)
+-                    if resolved_case.resolve()!=case.resolve():
+-                        raise ValueError('Case reference differs from inventory entry')
+-                    pairs.append((case,data))
+-                except (FileNotFoundError,ValueError) as exc:
+-                    unmatched.append('%s: %s'%(case,exc))
+-            except OSError:
+-                continue
+-            if len(pairs) + len(unmatched) >= MAX_FILES:
+-                limited = True
+-                break
+-        if limited:
+-            break
++                case,resolved_data=resolve_pair(data)
++                pairs.append((case,resolved_data))
++                paired_cases.add(case.name.casefold())
++            except (OSError,FileNotFoundError,ValueError) as exc:
++                # Preserve missing_data's legacy meaning: a Case with no Data.
++                # Orphan Data can be inspected independently by selecting it.
++                pass
++            if len(pairs)+len(unmatched)>=MAX_FILES:
++                limited=True;break
++        if limited:break
++        for name in cas_names:
++            if name.casefold() not in paired_cases:
++                unmatched.append('%s: no matching Data snapshot with a verified Case pointer or identical basename'%(folder/name))
++            if len(pairs)+len(unmatched)>=MAX_FILES:
++                limited=True;break
++        if limited:break
+     pairs.sort(key=lambda p: -max(p[0].stat().st_mtime_ns, p[1].stat().st_mtime_ns))
+-    return root, pairs, unmatched, limited
++    return root,pairs,unmatched,limited
+ 
+ 
+ def inventory(directory):
+@@ -65,6 +71,8 @@
+         try:
+             c, d = stat_record(case), stat_record(data)
+             results.append({'model_id': case.name[:-len(CAS_SUFFIX)],
++                            'snapshot_name':data.name,
++                            'snapshot_mtime_ns':data.stat().st_mtime_ns,
+                             'case': c, 'data': d,
+                             'hdf5_headers_ok': c['hdf5_signature'] and d['hdf5_signature'],
+                             'pairing': 'data_case_reference_or_same_stem_fallback',
+--- a/worker/af_h5_offline.py
++++ b/worker/af_h5_offline.py
+@@ -308,6 +308,7 @@
+     p.add_argument('--full-hash',action='store_true')
+     p.add_argument('--config',default='',help='JSON physical geometry constraints; skips 11.9 reference path')
+     p.add_argument('--check',action='store_true',help='Validate --config before opening any large H5 datasets')
++    p.add_argument('--geometry-check',action='store_true',help='Case-only physical geometry precheck, no Fluent data or SV_FLUX read')
+     args = p.parse_args()
+     try:
+         # JSON constraints are validated before opening a single HDF5 array.
+@@ -329,8 +330,22 @@
+                               'note':'Geometry/count/flux checks require actual Case/Data analysis'},
+                              ensure_ascii=False))
+             return
++        if args.geometry_check:
++            if not args.file:
++                raise ValueError('--geometry-check requires --file with a Fluent Case or Data')
++            if args.file.lower().endswith(CAS_SUFFIX):
++                actual_case=Path(args.file).expanduser().resolve()
++                if not actual_case.is_file():raise FileNotFoundError(str(actual_case))
++            else:
++                actual_case,_=resolve_pair(args.file,explicit_case=args.case_file or None)
++            from af_geometry_precheck import precheck_case_geometry,write_precheck_report
++            budget=((config or {}).get('resources') or {}).get('memory_budget_mb',3072)
++            report=precheck_case_geometry(actual_case,config=config,memory_budget_mb=budget)
++            if args.output_dir:report['artifacts']=write_precheck_report(report,args.output_dir)
++            print(json.dumps(report,ensure_ascii=False))
++            return
+         if not args.file:
+-            raise ValueError('--file is required except for --config ... --check')
++            raise ValueError('--file is required except for --check')
+         from af_progress import update as progress
+         progress(2, '配对保存解', '检查 Case/Data 路径和配置，不修改输入')
+         result = None
+@@ -392,7 +407,9 @@
+                 progress(8, '通用 H5 引擎', '识别数据组、网格拓扑与物理截面')
+                 adaptive_attempt=try_adaptive_native(case,data,
+                     str(Path(args.output_dir).parent/'native_reports'),config=config)
+-                if adaptive_attempt.get('status')=='adaptive_native_candidate_computed':
++                if (adaptive_attempt.get('status')=='adaptive_native_candidate_computed' or
++                    (adaptive_attempt.get('status')=='computed_export_failed' and
++                     adaptive_attempt.get('computed_status')=='adaptive_native_candidate_computed')):
+                     record=adaptive_attempt['metrics']
+                     layers=record['layers']
+                     result={
+@@ -421,10 +438,14 @@
+                             '阶梯截面按面心划分，正反向分别统计；串联上下层不可相加。',
+                             '质量控制体代数闭合不等于求解收敛。'],
+                         'analysis_json':adaptive_attempt['json_file'],
+-                        'html_file':adaptive_attempt['html_file'],
++                        'html_file':adaptive_attempt.get('html_file'),
++                    'report_save_status':adaptive_attempt.get('report_save_status','completed'),
++                    'export_error':adaptive_attempt.get('export_error'),
+                         'native_csv':adaptive_attempt['csv_file'],
+                     }
+-                elif adaptive_attempt.get('status')=='partial_physical_metrics':
++                elif (adaptive_attempt.get('status')=='partial_physical_metrics' or
++                      (adaptive_attempt.get('status')=='computed_export_failed' and
++                       adaptive_attempt.get('computed_status')=='partial_physical_metrics')):
+                     partial=adaptive_attempt['metrics']
+                     port=partial['port_flux']
+                     pressure=partial['pressure']
+@@ -451,6 +472,8 @@
+                             'data_convergence':'not_verified'},
+                         'analysis_json':adaptive_attempt.get('json_file'),
+                         'html_file':adaptive_attempt.get('html_file'),
++                        'report_save_status':adaptive_attempt.get('report_save_status','completed'),
++                        'export_error':adaptive_attempt.get('export_error'),
+                         'native_csv':adaptive_attempt.get('csv_file'),
+                         'warnings':['端口、可用总压降和已核验挡板可独立交付；晶圆配对未完成，不发布片间 CV 或旁路。',
+                                     '质量守恒不等于求解收敛，需独立核验。']}
+--- a/worker/af_model_config.py
++++ b/worker/af_model_config.py
+@@ -127,6 +127,8 @@
+     measurement=raw.get('measurement',{})
+     if not isinstance(measurement,dict):
+         raise ConfigurationError('measurement must be an object')
++    if measurement.get('baffle_y_range_m') is not None:
++        _range(measurement['baffle_y_range_m'],'measurement.baffle_y_range_m')
+     stations=measurement.get('pressure_stations',[])
+     if not isinstance(stations,list):
+         raise ConfigurationError('measurement.pressure_stations must be an array')
+--- a/worker/af_progress.py
++++ b/worker/af_progress.py
+@@ -13,6 +13,15 @@
+ 
+ _LAST_PERCENT = -1
+ _LAST_WRITE = 0.0
++_SCOPE_START = 0
++_SCOPE_END = 100
++
++def set_scope(start, end):
++    """Map an internal 0-100 job to an explicitly bounded parent phase."""
++    global _SCOPE_START, _SCOPE_END
++    if not (0 <= start < end <= 100):raise ValueError("Invalid progress scope")
++    _SCOPE_START, _SCOPE_END = int(start), int(end)
++
+ 
+ 
+ def update(percent, stage, detail='', *, completed=None, total=None, force=False):
+@@ -20,7 +29,7 @@
+     path = os.environ.get('AUTOFLUENT_PROGRESS_FILE', '').strip()
+     if not path:
+         return
+-    val = max(0, min(100, int(percent)))
++    val = max(0, min(100, int(_SCOPE_START + (float(percent)/100)*(_SCOPE_END-_SCOPE_START))))
+     now = time.monotonic()
+     if not force and val == _LAST_PERCENT and now-_LAST_WRITE < 0.8:
+         return
+@@ -60,4 +69,5 @@
+ 
+ def fail(stage, detail=''):
+     """Report failure without implying completed work never occurred."""
+-    update(max(0, min(99, _LAST_PERCENT)), stage, detail, force=True)
++    fraction=max(0, min(99, (_LAST_PERCENT-_SCOPE_START)*100/max(1,_SCOPE_END-_SCOPE_START)))
++    update(fraction, stage, detail, force=True)
+--- a/worker/af_render_saved.py
++++ b/worker/af_render_saved.py
+@@ -0,0 +1,41 @@
++# -*- coding: utf-8 -*-
++"""Regenerate an offline report from stored physical JSON without H5 rereads."""
++import argparse
++import json
++from pathlib import Path
++import uuid
++
++
++def render_stored_json(source):
++    from af_report_v3 import render_native_report,render_inspection_report,normalize_reference_metrics,render_reference_report
++    raw=json.loads(Path(source).read_text(encoding='utf-8-sig'))
++    schema=raw.get('schema')
++    if schema=='autofluent.adaptive_native.v1':
++        if raw.get('status')=='partial_physical_metrics':
++            return render_inspection_report({'schema':'autofluent.offline_case_data.v1',
++                'physical_analysis_status':'partial_physical_metrics','partial_native':raw,
++                'module_results':raw.get('modules',{}),
++                'first_full_analysis_blocker':raw.get('first_full_analysis_blocker'),
++                'model_id':Path(raw.get('provenance',{}).get('case_path','model')).name})
++        return render_native_report(raw)
++    if schema=='autofluent.offline_case_data.v1':
++        return render_inspection_report(raw)
++    if schema=='autofluent.common_cut_recomputed.v1':
++        from af_common_cut_compare import render_common_cut_html
++        return render_common_cut_html(raw)
++    raise ValueError('Unsupported stored JSON schema for lossless report regeneration: '+str(schema))
++
++
++def main():
++    p=argparse.ArgumentParser(description='Create shareable HTML from saved JSON, no CFF reread')
++    p.add_argument('--json',required=True);p.add_argument('--output-dir',required=True)
++    a=p.parse_args()
++    try:
++        html=render_stored_json(a.json)
++        folder=Path(a.output_dir).expanduser().resolve();folder.mkdir(parents=True,exist_ok=True)
++        path=folder/('rendered_'+uuid.uuid4().hex[:10]+'.html')
++        with path.open('x',encoding='utf-8') as f:f.write(html)
++        print(json.dumps({'status':'report_rendered_from_json','html_file':str(path),'no_h5_reread':True},ensure_ascii=False))
++    except Exception as exc:
++        print(json.dumps({'status':'error','reason':str(exc)[:500]},ensure_ascii=False));raise SystemExit(1)
++if __name__=='__main__':main()
+--- a/worker/af_report_v3.py
++++ b/worker/af_report_v3.py
+@@ -94,7 +94,7 @@
+                   _fmt(share)+'%' if share>=10 else '') for _,label,color,share in shares)+'</div>'
+ 
+ 
+-def _position_plot(channels,title):
++def _position_plot(channels,title, *, common_y_range=None):
+     # Each row has its own X-position set; staggered rows are never treated
+     # as a single interleaved series.
+     byrow={}
+@@ -107,7 +107,7 @@
+     yvals=[float(c['net_kg_s']) for points in byrow.values() for c in points]
+     if not all(math.isfinite(x) for x in xvals+yvals):
+         return '<p class="notavailable">通道坐标或流量存在非有限值。</p>'
+-    xmin,xmax=min(xvals),max(xvals);ymin,ymax=min(yvals),max(yvals)
++    xmin,xmax=min(xvals),max(xvals);ymin,ymax=(common_y_range if common_y_range is not None else (min(yvals),max(yvals)))
+     if xmax<=xmin:xmax=xmin+1e-6
+     if ymax<=ymin:ymax=ymin+max(1e-15,abs(ymin)*.1)
+     xlo,xhi=75,825;ylo,yhi=248,35
+@@ -129,6 +129,14 @@
+         color=colors[index%len(colors)]
+         coords=' '.join('%.1f,%.1f'%pos(float(c['x_center_m']),float(c['net_kg_s'])) for c in points)
+         lines.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="1.8"/>'%(coords,color))
++        for ch in points:
++            sx,sy=pos(float(ch['x_center_m']),float(ch['net_kg_s']))
++            info=('层 %s · 排 %s · 通道 %s · X=%s m · Z=%s m · 正向=%s kg/s · 反向=%s kg/s · 净量=%s kg/s' % (
++                title,row,ch.get('channel_id',''),_fmt(ch.get('x_center_m'),8),
++                _fmt(ch.get('z_center_m'),8),_fmt(ch.get('positive_kg_s'),8),
++                _fmt(ch.get('negative_magnitude_kg_s'),8),_fmt(ch.get('net_kg_s'),8)))
++            lines.append('<circle cx="%.2f" cy="%.2f" r="2.3" fill="%s"><title>%s</title></circle>'%
++                         (sx,sy,color,_e(info)))
+         for ch in (min(points,key=lambda c:c['net_kg_s']),max(points,key=lambda c:c['net_kg_s'])):
+             sx,sy=pos(float(ch['x_center_m']),float(ch['net_kg_s']))
+             lines.append('<circle cx="%.1f" cy="%.1f" r="4" fill="%s"><title>%s</title></circle>'%
+@@ -141,7 +149,7 @@
+             _e(title+' 片间流量空间分布')+'">'+''.join(lines)+'</svg>')
+ 
+ 
+-def _hole_svg(baffle):
++def _hole_svg(baffle, port=None):
+     holes=baffle.get('holes') or []
+     if not holes:return '<p class="notavailable">没有通过真实孔位识别的挡板孔；孔位图未取得。</p>'
+     coords=[v.get('center_m') for v in holes if isinstance(v.get('center_m'),list) and len(v['center_m'])==3]
+@@ -158,10 +166,74 @@
+         color='#b25222' if shade<.2 else ('#087e8b' if shade>.8 else '#5574a5')
+         marks.append('<circle cx="%.1f" cy="%.1f" r="4.2" fill="%s"><title>孔 %d：X=%s, Z=%s，流量=%s kg/s</title></circle>'%
+                      (x,y,color,i+1,_e(_fmt(c[0])),_e(_fmt(c[2])),_e(_fmt(flows[i]))))
+-    marks.append('<text x="45" y="20">X–Z 原生孔位分布（极值着色）</text>')
++    for idx,label in ((flows.index(min(flows)),'最低'),(flows.index(max(flows)),'最高')):
++        c=coords[idx];xx=45+760*(c[0]-min(xs))/(max(xs));yy=258-222*(c[2]-min(zs))/(max(zs))
++        marks.append('<circle cx="%.1f" cy="%.1f" r="9" stroke="#b25222" stroke-width="2" fill="none"><title>%s孔：%s kg/s</title></circle>'%
++            (xx,yy,_e(label),_e(_fmt(flows[idx],9))))
++    for zone in (port or {}).get('boundary_zones',[]):
++        if zone.get('kind')!='outlet':continue
++        for loc in zone.get('physical_ports',[]):
++            c=loc.get('center_m')
++            if not c or len(c)<3:continue
++            xx=45+760*(c[0]-min(xs))/(max(xs));yy=258-222*(c[2]-min(zs))/(max(zs))
++            marks.append('<circle cx="%.1f" cy="%.1f" r="7" stroke="#181818" stroke-width="2" fill="none"><title>出口投影：%s</title></circle>'%
++                         (xx,yy,_e(zone.get('zone','出口'))))
++    marks.append('<text x="45" y="20">X–Z 原生孔位（红圈极值，黑圈出口投影）</text>')
+     marks.append('<text x="760" y="288">X (m)</text>')
+     marks.append('<text x="7" y="30">Z</text>')
+     return '<svg class="chart" viewBox="0 0 860 305" role="img" aria-label="真实挡板孔位">'+''.join(marks)+'</svg>'
++
++
++def _baffle_row_histogram(baffle):
++    """True per-row net flux, with a count-proportional equal-hole reference."""
++    rows=baffle.get('rows') or []
++    if not rows:return '<p class="notavailable">孔排数据未取得。</p>'
++    if any(r.get('net_kg_s',0)<0 for r in rows):
++        return '<p class="warn">部分孔排存在负向净通量，不绘制易误读的正向柱状图。</p>'
++    total=sum(float(r['net_kg_s']) for r in rows)
++    holes=sum(int(r.get('hole_count',0)) for r in rows)
++    if holes<=0 or total<=0:return '<p class="notavailable">没有正向孔排流量。</p>'
++    base=[total*float(r['hole_count'])/holes for r in rows]
++    scale=max([float(r['net_kg_s']) for r in rows]+base)*1.16
++    lines=['<text x="60" y="19">孔排净流量 (kg/s) · 橙色线为按孔数比例分配的等流量参考</text>']
++    for i,(r,reference) in enumerate(zip(rows,base)):
++        x=85+i*max(62,700/max(1,len(rows)))
++        h=175*float(r['net_kg_s'])/scale
++        ref=175*reference/scale
++        lines.append('<rect x="%.1f" y="%.1f" width="34" height="%.1f" fill="#087e8b"><title>第 %s 排：%s kg/s；均匀参考 %s kg/s</title></rect>'%
++                     (x,224-h,h,_e(r.get('index')), _e(_fmt(r['net_kg_s'],9)), _e(_fmt(reference,9))))
++        lines.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="#d55e00" stroke-width="2"/>'%
++                     (x-3,224-ref,x+37,224-ref))
++        lines.append('<text x="%.1f" y="247">第 %s 排</text>'%(x-8,_e(r.get('index'))))
++    return '<svg class="chart" viewBox="0 0 860 265" role="img" aria-label="真实挡板孔排净流量柱状图">'+''.join(lines)+'</svg>'
++
++
++def _plenum_pressure_svg(baffle, port=None):
++    info=baffle.get('lower_plenum_static_pressure_pa') or {}
++    cells=info.get('xz_bins') or []
++    if not cells:return '<p class="notavailable">集气腔 X–Z 空间静压样本不足，未生成模拟云图。</p>'
++    xmin=min(c['x_lo_m'] for c in cells);xmax=max(c['x_hi_m'] for c in cells)
++    zmin=min(c['z_lo_m'] for c in cells);zmax=max(c['z_hi_m'] for c in cells)
++    lo=min(c['mean_pa'] for c in cells);hi=max(c['mean_pa'] for c in cells)
++    if xmax<=xmin or zmax<=zmin:return '<p class="notavailable">压力空间坐标退化。</p>'
++    rects=[]
++    for c in cells:
++        x=56+760*(c['x_lo_m']-xmin)/(xmax-xmin);y=254-204*(c['z_hi_m']-zmin)/(zmax-zmin)
++        w=760*(c['x_hi_m']-c['x_lo_m'])/(xmax-xmin);h=204*(c['z_hi_m']-c['z_lo_m'])/(zmax-zmin)
++        t=(c['mean_pa']-lo)/(hi-lo) if hi>lo else 0.5
++        red=int(45+196*t);blue=int(180-112*t);green=int(112+29*t)
++        rects.append('<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" fill="rgb(%d,%d,%d)"><title>真实单元中心样本 %d 个 · 静压均值 %s Pa</title></rect>'%
++                     (x,y,w,h,red,green,blue,c['cell_count'],_e(_fmt(c['mean_pa'],9))))
++    for zone in (port or {}).get('boundary_zones',[]):
++        if zone.get('kind')!='outlet':continue
++        for loc in zone.get('physical_ports',[]):
++            c=loc.get('center_m')
++            if not c:continue
++            x=56+760*(c[0]-xmin)/(xmax-xmin);y=254-204*(c[2]-zmin)/(zmax-zmin)
++            rects.append('<circle cx="%.2f" cy="%.2f" r="7" fill="none" stroke="#101010" stroke-width="2"><title>%s 出口投影</title></circle>'%(x,y,_e(zone.get('zone','出口'))))
++    rects.append('<text x="56" y="20">集气腔 X–Z 实际单元中心静压分箱（非 Fluent 原生云图）</text>')
++    rects.append('<text x="56" y="287">静压范围 %s ~ %s Pa；仅占有真实样本的区域绘制</text>'%(_fmt(lo,7),_fmt(hi,7)))
++    return '<svg class="chart" viewBox="0 0 860 305" role="img" aria-label="真实采样 X Z 静压分布">'+''.join(rects)+'</svg>'
+ 
+ 
+ def _section(name,body):
+@@ -208,9 +280,12 @@
+     flow.append('<p class="small">各层截面位于串联流路，绝不跨层相加。端部旁路已经包含在外围主分区内，不重复计入。</p>')
+     body.append(_section('1. 入口气体去了哪里', ''.join(flow)))
+     plot=[];extrema=[];details=[]
++    all_flows=[float(ch['net_kg_s']) for layer in layers.values() for ch in (layer.get('channels') or [])
++               if isinstance(ch.get('net_kg_s'),(int,float)) and math.isfinite(ch['net_kg_s'])]
++    common_scale=(min(all_flows),max(all_flows)) if all_flows else None
+     for lname,layer in layers.items():
+         channels=layer.get('channels') or []
+-        plot.append(_position_plot(channels,lname))
++        plot.append(_position_plot(channels,lname,common_y_range=common_scale))
+         byrow={}
+         for ch in channels:byrow.setdefault(ch.get('row'),[]).append(ch)
+         for row,vals in sorted(byrow.items()):
+@@ -227,10 +302,16 @@
+     if baffle.get('status')=='geometry_candidate_holes_native_flux_computed':
+         b_text=_cards([('检测到的孔数',baffle.get('hole_count')),('孔排数',baffle.get('hole_row_count')),
+                        ('逐孔流量 CV',_fmt(baffle.get('all_hole_cv_pct'))+'%')])
+-        b_text+=_hole_svg(baffle)
++        b_text+=_hole_svg(baffle,port)
++        b_text+=_baffle_row_histogram(baffle)
+         b_text+=_table(['孔排','孔数','总流量 kg/s','排内 CV'],[
+             [r.get('index'),r.get('hole_count'),_fmt(r.get('net_kg_s')),_fmt(r.get('cv_pct'))+'%']
+             for r in baffle.get('rows',[])])
++        b_text+='<details><summary>逐孔正反向流量与真实坐标（展开）</summary>'+_table(
++            ['孔','X (m)','Z (m)','正向 (kg/s)','反向 (kg/s)','净量 (kg/s)'],[
++                [j+1,_fmt(h.get('center_m',[None,None,None])[0],8),_fmt(h.get('center_m',[None,None,None])[2],8),
++                 _fmt(h.get('positive_kg_s'),9),_fmt(h.get('negative_magnitude_kg_s'),9),_fmt(h.get('net_kg_s'),9)]
++                for j,h in enumerate(baffle.get('holes',[]))])+'</details>'
+         b_text+=('<p class="small">11.9 严格几何原生孔洞汇总，逐孔坐标在当前结构化参考结果中未提供；未添加模拟孔位。</p>' if provenance.get('report_profile')=='11_9_validated_reference' else '<p class="small">候选挡板孔由原生网格连通分量识别；孔数与板边流量需独立几何核验。</p>')
+     else:
+         b_text='<p class="notavailable">未取得可确认的挡板孔：'+_e(baffle.get('reason','缺少当前模型的可靠孔位识别'))+'</p>'
+@@ -248,6 +329,8 @@
+              _fmt(plenum.get('range')),_fmt(plenum.get('unweighted_mean'))]])
+     else:p_text+='<p class="small">集气腔压力分布：未取得。</p>'
+     psegments=pressure.get('plenum_x_segments') or []
++    if baffle.get('lower_plenum_static_pressure_pa'):
++        p_text+='<h3>集气腔 X–Z 实测静压分箱</h3>'+_plenum_pressure_svg(baffle,port)
+     if psegments:
+         p_text+='<h3>集气腔沿 X 分段静压</h3>'+_scalar_position_plot(psegments, '集气腔分段静压 Pa')
+         p_text+=_table(['X 范围 (m)','单元平均静压 (Pa)'],[[str(_fmt(x['x_lo_m']))+' ~ '+str(_fmt(x['x_hi_m'])),_fmt(x['mean_pa'])] for x in psegments])
+@@ -271,18 +354,21 @@
+     body.append(_section('6. 与基线方案对照',
+         '<div class="note">本次只有一份保存解的统计。未读取与本模型同口径的基线结果，'
+         '不计算优化百分比；比较之前须核对工况、截面、排布、面 ID 来源和收敛证据。</div>'))
+-    weakest=[]
++    tasks=[]
+     for lname,layer in layers.items():
+         channels=layer.get('channels') or []
+-        if channels:
+-            low=min(channels,key=lambda c:c['net_kg_s'])
+-            weakest.append([lname,low.get('channel_id','未取得'),_fmt(low.get('x_center_m')),
+-                            _fmt(low.get('net_kg_s')),
+-                            '复核该 X 位置的入口匀气、局部遮挡和外围绕流',
+-                            '保持入口流量、压力、网格精度及统计截面不变'])
++        if not channels:continue
++        low=min(channels,key=lambda c:c['net_kg_s'])
++        tasks.append(['当前最弱片间通道 · '+str(lname),
++                      str(low.get('channel_id','未取得'))+' / X='+_fmt(low.get('x_center_m'),8)+' m',
++                      _fmt(low['net_kg_s'],8)+' kg/s；当前本层 CV '+_fmt(layer.get('cv_pct'))+'%',
++                      '先核查局部入口阻力、片间遮挡及外围绕流；原因尚未判定',
++                      '如能锁定一个结构变量，再仅改变该变量运行对照',
++                      '保持入口流量、温度、压力、网格策略和同一统计截面',
++                      '同口径重新计算；比较最弱通道、CV、旁路和压降，守恒及收敛核验不得降低'])
+     body.append(_section('7. 下一轮仿真怎么安排',
+-        '<p class="small">下列仅是数据触发的检查优先级，不代表因果关系已被证明。</p>'+
+-        _table(['层','优先检查通道','X (m)','当前净流量','建议检查','固定条件'],weakest)))
++        '<p class="small">优先进行可消除歧义的检查。单次保存解不能证明某一结构导致弱流。</p>'+ 
++        _table(['发现','位置','原生证据','优先核查','唯一改动项','固定条件','对照判据'],tasks)))
+     detail='<details><summary>逐通道正反向流量与空间坐标（展开）</summary>'+_table(
+         ['层','排','通道','X (m)','Z (m)','正向 kg/s','反向幅值 kg/s','净 kg/s'],details)+'</details>'
+     directional=[]
+@@ -445,7 +531,12 @@
+     port_pressure=partial.get('pressure') or {}
+     blockers=result.get('first_full_analysis_blocker') or {}
+     module_results=result.get('module_results') or {}
+-    head_status=('部分完成 · 晶圆壁面配对待复核' if partial and (blockers.get('stage') or '').startswith('wafer_') else ('部分完成 · 物理分析待复核' if partial else '保存解读取诊断 · 物理结果未完成认证'))
++    head_status=('部分完成 · 晶圆壁面配对待复核' if partial and (
++        (blockers.get('stage') or '').startswith('wafer_') or
++        (blockers.get('pipeline_stage') or '').startswith('wafer_') or
++        blockers.get('stage') in ('physical_patch_pairing','row_assignment','expected_model_validation',
++                                 'connected_patch_extraction','wall_candidate_screening','layer_generation'))
++        else ('部分完成 · 物理分析待复核' if partial else '保存解读取诊断 · 物理结果未完成认证'))
+     header=('<header><div class="eyebrow">AutoFluent / ALD 流动分析 / 独立离线报告</div>'
+             '<h1>仿真结果与结构优化</h1><p>'+_e(head_status)+'</p>'
+             '<p>方案：<strong>'+_e(model)+'</strong></p>'
+@@ -460,7 +551,8 @@
+     if blockers:
+         sections.append(_section('首个实际阻塞', '<div class="warn"><strong>'+_e(blockers.get('reason','未取得'))+'</strong></div>'+
+             '<p>阶段：'+_e(blockers.get('stage','未知'))+'；错误类型：'+_e(blockers.get('error_type','未知'))+'</p>'+
+-            _table(['物理模块','状态','原因或来源'], [[k,v.get('status'),v.get('reason',v.get('source',''))] for k,v in module_results.items()])))
++            _table(['物理模块','状态','原因或来源'], [[k,v.get('status'),v.get('reason',v.get('source',''))] for k,v in module_results.items()])+
++            ('<details><summary>晶圆识别逐阶段诊断</summary><pre>'+_e(json.dumps(blockers.get('diagnostics'),ensure_ascii=False,indent=2,default=str))+'</pre></details>' if blockers.get('diagnostics') else '')))
+     port_rows=[]
+     for item in port.get('boundary_zones',[]):
+         port_rows.append([item.get('zone'),item.get('kind'),_fmt(item.get('net_kg_s'),8),_fmt(item.get('positive_kg_s'),8),_fmt(item.get('negative_magnitude_kg_s'),8)])
+@@ -482,14 +574,30 @@
+                (_e(str(baffle['hole_count'])),_fmt(baffle.get('all_hole_cv_pct')),
+                 _fmt(baffle.get('board_edge_net_kg_s'),9),_fmt(baffle.get('board_cut_closure_error_kg_s'),10)))
+         btext+=_table(['孔排','孔数','净流量 kg/s','CV'],hole_rows)
++        btext+=_hole_svg(baffle,port)
++        btext+=_baffle_row_histogram(baffle)
+         btext+='<details><summary>已验证原生逐孔明细（展开）</summary>'+_table(['孔','X (m)','Z (m)','净 kg/s','正向 kg/s','反向 kg/s'],hole_detail)+'</details>'
+     else:
+         btext='<p class="notavailable">挡板：'+_e(baffle.get('reason','未取得可认证开孔'))+'</p>'
++        if baffle.get('whole_cut_net_kg_s') is not None:
++            btext+=_table(['已取得的原生截面量','值'],[
++                ['完整板截面净流量 (kg/s)',_fmt(baffle.get('whole_cut_net_kg_s'),10)],
++                ['待核对积分片数量',baffle.get('candidate_integral_component_count','未取得')],
++                ['未归属净流量 (kg/s)',_fmt(baffle.get('unassigned_net_kg_s'),10)],
++                ['候选判定状态',baffle.get('status','未取得')]])
++        if baffle.get('diagnostics'):
++            btext+='<details><summary>挡板选板与孔轮廓诊断</summary><pre>'+_e(json.dumps(baffle['diagnostics'],ensure_ascii=False,indent=2,default=str))+'</pre></details>'
+     sections.append(_section('3. 挡板开孔与出口',btext))
+-    sections.append(_section('4. 压力与压降',
+-        ('<p>端口质量流量加权压降（低速近似）：'+_fmt(port_pressure.get('pressure_drop_pa'))+' Pa。需另外核验 Mach 和材料。</p>'
++    station_rows=[[x.get('id'),_fmt(x.get('y_m')),_fmt(x.get('thickness_m')),
++                   x.get('cell_count','未取得'),_fmt(x.get('mean_pa')),
++                   x.get('status','未取得'),x.get('reason','')]
++                  for x in port_pressure.get('stations',[])]
++    ptext=('<p>端口质量流量加权压降（低速近似）：'+_fmt(port_pressure.get('pressure_drop_pa'))+' Pa。需另外核验 Mach 和材料。</p>'
+          if port_pressure.get('status','').startswith('computed_') else
+-        '<p class="notavailable">尚未获得通过端口/测站核验的静压和总压降。</p>')))
++        '<p class="notavailable">端口总压降未取得：'+_e(port_pressure.get('reason','压力字段不完整'))+'</p>')
++    if station_rows:
++        ptext+='<h3>独立静压测站</h3>'+_table(['测站','Y (m)','厚度 (m)','单元数','平均静压 Pa','状态','原因'],station_rows)
++    sections.append(_section('4. 压力与压降',ptext))
+     zone_records=[]
+     for item in port.get('zones',[]):
+         v=item.get('signed_sum_kg_s')
+--- a/worker/af_wafer_patches.py
++++ b/worker/af_wafer_patches.py
+@@ -11,10 +11,19 @@
+ 
+ 
+ class PatchRecognitionError(ValueError):
+-    pass
+-
+-
+-def extract_patches(triangles, *, tol, y_range, x_range=None, min_area=None):
++    """Fail closed with a machine-readable layer stage and candidate evidence."""
++    def __init__(self, message, *, stage='wafer_pairing', diagnostics=None):
++        super().__init__(message)
++        self.stage=stage
++        self.diagnostics=dict(diagnostics or {})
++
++
++def _record(diag, **data):
++    if diag is not None:
++        diag.update(data)
++
++
++def extract_patches(triangles, *, tol, y_range, x_range=None, min_area=None, diagnostics=None):
+     """Keep X-normal triangles and cluster connected panels per X station.
+ 
+     Working copies are bounded by one X-station at a time. Exact/snap-rounded
+@@ -26,26 +35,33 @@
+         raise PatchRecognitionError('Wall triangle array shape must be (N,3,3)')
+     if not np.isfinite(verts).all():
+         raise PatchRecognitionError('Non-finite wafer wall coordinates')
++    _record(diagnostics, raw_wall_triangle_count=int(len(verts)), stage='wall_candidate_screening')
+     ctr=verts.mean(axis=1)
+     flat=np.ptp(verts[:,:,0],axis=1)<=tol
+     mask=flat & (ctr[:,1]>=y_range[0]) & (ctr[:,1]<=y_range[1])
+     if x_range is not None:
+         mask &= (ctr[:,0]>=x_range[0]-tol)&(ctr[:,0]<=x_range[1]+tol)
++    _record(diagnostics, x_normal_triangle_count=int(flat.sum()),
++            spatially_filtered_triangle_count=int(mask.sum()))
+     verts=verts[mask]
+-    if not len(verts):raise PatchRecognitionError('No X-normal wafer candidates in configured layer/X search ranges')
++    if not len(verts):raise PatchRecognitionError('No X-normal wafer candidates in configured layer/X search ranges',
++                                                  stage='wall_candidate_screening',diagnostics=diagnostics)
+     centers=ctr[mask]
+     normals=np.cross(verts[:,1]-verts[:,0],verts[:,2]-verts[:,0]);area=np.linalg.norm(normals,axis=1)*.5
+     good=np.isfinite(area)&(area>0)
+     verts=verts[good];centers=centers[good];area=area[good]
+-    if not len(verts):raise PatchRecognitionError('Candidate wafer faces have no measurable area')
++    if not len(verts):raise PatchRecognitionError('Candidate wafer faces have no measurable area',
++                                                  stage='wall_candidate_screening',diagnostics=diagnostics)
++    _record(diagnostics, nondegenerate_triangle_count=int(len(verts)))
+     bins=np.rint(centers[:,0]/tol).astype(np.int64)
+     order=np.argsort(bins,kind='stable');sorted_bins=bins[order]
+     limits=np.r_[0,np.flatnonzero(np.diff(sorted_bins))+1,len(sorted_bins)]
+     patches=[]
+     for a,b in zip(limits[:-1],limits[1:]):
+         indices=order[a:b];v=verts[indices];w=area[indices];ctr_station=centers[indices]
+-        # Triangles with at least one common projected YZ vertex belong to
+-        # the same physical planar patch; independent coplanar rows do not.
++        # A single shared vertex is NOT a mesh edge. Two adjacent wafers can
++        # touch at a node or have interleaved discretisations at the same X;
++        # merge only triangles sharing an entire projected mesh edge.
+         yz=np.rint(v[:,:,1:].reshape(-1,2)/tol).astype(np.int64)
+         _,vertex_ids=np.unique(yz,axis=0,return_inverse=True)
+         parents=np.arange(len(indices),dtype=np.int32)
+@@ -58,10 +74,12 @@
+             if i!=j:parents[j]=i
+         shared={}
+         for tri_i,vertices in enumerate(vertex_ids.reshape(-1,3)):
+-            for node in vertices:
+-                node=int(node)
+-                prev=shared.get(node)
+-                if prev is None:shared[node]=tri_i
++            for u,vv in ((0,1),(1,2),(2,0)):
++                first,second=sorted((int(vertices[u]),int(vertices[vv])))
++                if first==second:continue
++                edge=(first,second)
++                prev=shared.get(edge)
++                if prev is None:shared[edge]=tri_i
+                 else:union(tri_i,prev)
+         groups=defaultdict(list)
+         for i in range(len(indices)):groups[root(i)].append(i)
+@@ -79,20 +97,17 @@
+                             'z':(float(ext[:,2].min()),float(ext[:,2].max())),
+                             'triangles':int(len(sub)),
+                             'z_centers':cc[:,2].copy(), 'area_weights':ar.copy()})
+-        # Disconnected mesh patches at the same axial coordinate may belong
+-        # to separate aligned wafer rows, but their physical YZ footprints
+-        # must not substantially overlap: that is an unresolved duplicate.
+-        for ii in range(before_station,len(patches)):
+-            aa=patches[ii]
+-            for jj in range(ii+1,len(patches)):
+-                bb=patches[jj]
+-                ya=max(0.,min(aa['y'][1],bb['y'][1])-max(aa['y'][0],bb['y'][0]))
+-                za=max(0.,min(aa['z'][1],bb['z'][1])-max(aa['z'][0],bb['z'][0]))
+-                minbox=min((aa['y'][1]-aa['y'][0])*(aa['z'][1]-aa['z'][0]),
+-                           (bb['y'][1]-bb['y'][0])*(bb['z'][1]-bb['z'][0]))
+-                if ya*za>max(tol*tol, minbox*.025):
+-                    raise PatchRecognitionError('Cannot distinguish both overlapping rows: disconnected X-normal panels have overlapping physical YZ footprint at X=%.9g m; cannot assign coincident faces' % aa['x'])
+-    if not patches:raise PatchRecognitionError('No connected X-normal wafer wall patches survived layer screening')
++        # Do not reject patches simply because bounding boxes overlap.
++        # Non-convex/disconnected physical panels can have overlapping boxes;
++        # actual front/back pairing and row ownership must resolve them.
++        # The raw overlapping candidates are retained for explicit review.
++        if diagnostics is not None:
++            diagnostics['x_station_count']=int(len(limits)-1)
++    _record(diagnostics, connected_patch_count=int(len(patches)),
++            stage='physical_patch_pairing',
++            first_patch_x_m=[float(p['x']) for p in patches[:8]])
++    if not patches:raise PatchRecognitionError('No connected X-normal wafer wall patches survived layer screening',
++                                                stage='connected_patch_extraction',diagnostics=diagnostics)
+     return patches
+ 
+ 
+@@ -135,19 +150,26 @@
+ 
+ 
+ def pair_wafer_patches(patches, *, thickness_range, row_ranges, min_plates=5,
+-                       regular_gap_range=None, x_range=None):
++                       regular_gap_range=None, x_range=None, diagnostics=None):
+     """One-to-one physical wafer pairing, row assignment after pairing.
+ 
+     An isolated end-wall station is excluded if it lies outside the dominant
+     repeated row sequence; an interior unpaired wafer-sized face is an error.
+     """
++    _record(diagnostics, connected_patch_count=int(len(patches)),
++            minimum_required_patches=int(2*min_plates*len(row_ranges)),stage='physical_patch_pairing')
+     if len(patches)<2*min_plates*len(row_ranges):
+-        raise PatchRecognitionError('Too few connected wall patches for wafer pairing')
++        raise PatchRecognitionError('Too few connected wall patches for wafer pairing: found %d, require >=%d' %
++                                    (len(patches),2*min_plates*len(row_ranges)),
++                                    stage='physical_patch_pairing',diagnostics=diagnostics)
+     a=np.asarray([p['area'] for p in patches]);med=float(np.median(a))
+     # Reject broad chamber end-walls and tiny independent supports by area.
+     keep=(a>=med*.23)&(a<=med*3.5)
+     excluded=[{'x_m':p['x'],'reason':'non_repeating_patch_area'} for p,k in zip(patches,keep) if not k]
+     p=[p for p,k in zip(patches,keep) if k]
++    _record(diagnostics, patch_count_after_area_filter=int(len(p)),
++            area_filter_excluded_count=len(excluded),
++            area_filter_first_excluded=excluded[:8])
+     tlo,thi=thickness_range
+     p.sort(key=lambda patch:patch['x'])
+     edges=defaultdict(list)
+@@ -159,9 +181,17 @@
+             footprint,ratio=_footprint_similarity(first,p[j])
+             if footprint>=.80 and ratio>=.55:
+                 edges[i].append(j);edges[j].append(i)
++    _record(diagnostics, thickness_candidate_edge_count=int(sum(len(x) for x in edges.values())//2),
++            thickness_bounds_m=[float(tlo),float(thi)])
+     for i,neighbours in edges.items():
+         if len(neighbours)>1:
+-            raise PatchRecognitionError('Multiple thickness-compatible front/back wall patches near X=%.9g m (%d choices)' % (p[i]['x'],len(neighbours)))
++            distances=[abs(p[j]['x']-p[i]['x']) for j in neighbours]
++            _record(diagnostics, first_conflict_x_m=float(p[i]['x']),
++                    competing_thickness_m=[float(x) for x in distances],
++                    rejected_by='nonunique_thickness_spatial_pairing')
++            raise PatchRecognitionError('Multiple thickness-compatible front/back wall patches near X=%.9g m; possible thicknesses %s m' %
++                                        (p[i]['x'],[round(x,9) for x in distances]),
++                                        stage='physical_patch_pairing',diagnostics=diagnostics)
+     used=set();pairs=[]
+     for i in sorted(edges):
+         if i in used:continue
+@@ -181,8 +211,25 @@
+                       'zlo':max(first['z'][0],second['z'][0]),
+                       'zhi':min(first['z'][1],second['z'][1])})
+         used.update((i,j))
++    # Two physically distinct wafers must not occupy the same X thickness
++    # interval *and* overlapping YZ footprint. This catches genuinely
++    # coincident solid panels while allowing aligned rows with disjoint Z.
++    for i,first in enumerate(pairs):
++        for second in pairs[i+1:]:
++            x_overlap=min(first['xhi'],second['xhi'])-max(first['xlo'],second['xlo'])
++            y_overlap=min(first['yhi'],second['yhi'])-max(first['ylo'],second['ylo'])
++            z_overlap=min(first['zhi'],second['zhi'])-max(first['zlo'],second['zlo'])
++            smaller=min(first['zhi']-first['zlo'],second['zhi']-second['zlo'])
++            if x_overlap>tlo*.35 and y_overlap>0 and z_overlap>max(tlo*.02,smaller*.025):
++                _record(diagnostics,first_conflict_x_m=float(first['xlo']),
++                        first_conflict_z_overlap_m=float(z_overlap),
++                        rejected_by='physically_overlapping_wafer_panels')
++                raise PatchRecognitionError('both overlapping rows contain physically coincident wafer panels at X=%.9g m (YZ overlap %.9g m)' %
++                                            (first['xlo'],z_overlap),stage='row_assignment',diagnostics=diagnostics)
++    _record(diagnostics, paired_wafer_count=int(len(pairs)),stage='row_assignment')
+     if len(pairs)<min_plates*len(row_ranges):
+-        raise PatchRecognitionError('Confirmed wafer pairs below per-row minimum; found %d' % len(pairs))
++        raise PatchRecognitionError('Confirmed wafer pairs below per-row minimum; found %d' % len(pairs),
++                                    stage='physical_patch_pairing',diagnostics=diagnostics)
+     rows=[]
+     for row in range(len(row_ranges)):
+         plate=sorted((q for q in pairs if q['row']==row),key=lambda q:q['xlo'])
+@@ -256,6 +303,9 @@
+         for patch in p:
+             if not x_range[0]-1e-8<=patch['x']<=x_range[1]+1e-8:
+                 raise PatchRecognitionError('Wafer patch fell outside supplied X range after filtering')
++    _record(diagnostics, identified_row_wafer_counts=[int(x['plate_count']) for x in rows],
++            identified_row_channel_counts=[len(x['regular_gap_index']) for x in rows],
++            excluded_candidate_count=int(len(excluded)),excluded_candidates=excluded[:12],stage='complete')
+     return rows,{'raw_patch_count':len(patches),'paired_wafer_count':len(pairs),
+                  'excluded_candidate_count':len(excluded),
+                  'first_excluded_candidates':excluded[:8],

@@ -1,0 +1,808 @@
+--- a/worker/af_wafer_patches.py
++++ b/worker/af_wafer_patches.py
+@@ -57,6 +57,7 @@
+     order=np.argsort(bins,kind='stable');sorted_bins=bins[order]
+     limits=np.r_[0,np.flatnonzero(np.diff(sorted_bins))+1,len(sorted_bins)]
+     patches=[]
++    merged_fragments=0
+     for a,b in zip(limits[:-1],limits[1:]):
+         indices=order[a:b];v=verts[indices];w=area[indices];ctr_station=centers[indices]
+         # A single shared vertex is NOT a mesh edge. Two adjacent wafers can
+@@ -83,8 +84,48 @@
+                 else:union(tri_i,prev)
+         groups=defaultdict(list)
+         for i in range(len(indices)):groups[root(i)].append(i)
+-        before_station=len(patches)
+-        for component in groups.values():
++        # Small mesh islands may be pieces of one panel when nonconforming
++        # triangles leave a microscopic seam. Reattach only a uniquely matched
++        # *boundary* fragment: same X, edge-aligned projected bounding boxes,
++        # practically touching, and a parent panel much larger than the island.
++        # Do not join two complete disjoint wafer rows even if their boxes meet.
++        components=[list(group) for group in groups.values()]
++        if 1<len(components)<=512:
++            def footprint(ids):
++                nodes=v[np.asarray(ids,dtype=np.int64)].reshape(-1,3)
++                return (float(nodes[:,1].min()),float(nodes[:,1].max()),
++                        float(nodes[:,2].min()),float(nodes[:,2].max()))
++            areas=[float(w[group].sum()) for group in components]
++            bounds=[footprint(group) for group in components]
++            max_area=max(areas)
++            small=[i for i,weight in enumerate(areas) if weight<max_area*.12]
++            mains=[i for i,weight in enumerate(areas) if weight>=max_area*.50]
++            taken=set()
++            for fi in small:
++                fa,fb,fc,fd=bounds[fi]
++                matches=[]
++                for pi in mains:
++                    ya,yb,za,zb=bounds[pi]
++                    overlap_y=max(0,min(fb,yb)-max(fa,ya))
++                    overlap_z=max(0,min(fd,zb)-max(fc,za))
++                    gap_y=max(0,ya-fb,fa-yb)
++                    gap_z=max(0,za-fd,fc-zb)
++                    # Only a seam on one edge with substantial common extent
++                    # along the other direction is convincing geometric proof.
++                    seam=((gap_y<=tol*5 and overlap_y<=tol*3 and
++                           overlap_z>=.70*min(fd-fc,zb-za)) or
++                          (gap_z<=tol*5 and overlap_z<=tol*3 and
++                           overlap_y>=.70*min(fb-fa,yb-ya)))
++                    enlarged_y=max(yb,fb)-min(ya,fa)
++                    enlarged_z=max(zb,fd)-min(za,fc)
++                    if (seam and enlarged_y<=(yb-ya)*1.25 and
++                            enlarged_z<=(zb-za)*1.25):
++                        matches.append(pi)
++                if len(matches)==1:
++                    components[matches[0]].extend(components[fi]);taken.add(fi)
++                    merged_fragments+=1
++            components=[c for i,c in enumerate(components) if i not in taken]
++        for component in components:
+             sub=np.asarray(component,dtype=np.int64)
+             vv=v[sub];ar=w[sub];cc=ctr_station[sub]
+             ext=vv.reshape(-1,3)
+@@ -96,14 +137,23 @@
+                             'y':(float(ext[:,1].min()),float(ext[:,1].max())),
+                             'z':(float(ext[:,2].min()),float(ext[:,2].max())),
+                             'triangles':int(len(sub)),
+-                            'z_centers':cc[:,2].copy(), 'area_weights':ar.copy()})
++                            'z_centers':cc[:,2].copy(), 'area_weights':ar.copy(),
++                            'centroid_yz_m':[float(np.average(cc[:,1],weights=ar)),
++                                             float(np.average(cc[:,2],weights=ar))],
++                            'projection_extent_yz_m':[float(ay),float(az)]})
+         # Do not reject patches simply because bounding boxes overlap.
+         # Non-convex/disconnected physical panels can have overlapping boxes;
+         # actual front/back pairing and row ownership must resolve them.
+         # The raw overlapping candidates are retained for explicit review.
+         if diagnostics is not None:
+             diagnostics['x_station_count']=int(len(limits)-1)
+-    _record(diagnostics, connected_patch_count=int(len(patches)),
++    _record(diagnostics, merged_boundary_fragment_count=int(merged_fragments),
++            connected_patch_count=int(len(patches)),
++            connected_patches_per_x_station={str(round(float(x),8)):int(n) for x,n in
++                sorted(__import__('collections').Counter(round(float(p['x']),8) for p in patches).items())[:12]},
++            first_patch_evidence=[{'x_m':p['x'],'area_m2':p['area'],
++                                   'y_range_m':list(p['y']),'z_range_m':list(p['z']),
++                                   'centroid_yz_m':p['centroid_yz_m']} for p in patches[:10]],
+             stage='physical_patch_pairing',
+             first_patch_x_m=[float(p['x']) for p in patches[:8]])
+     if not patches:raise PatchRecognitionError('No connected X-normal wafer wall patches survived layer screening',
+@@ -116,7 +166,9 @@
+     for axis in ('y','z'):
+         a0,a1=a[axis];b0,b1=b[axis]
+         overlap=max(0.,min(a1,b1)-max(a0,b0))
+-        length=min(a1-a0,b1-b0)
++        # Symmetric overlap: an unrelated smaller support located inside a
++        # wafer bounding box must not count as a full matching wafer face.
++        length=max(a1-a0,b1-b0)
+         ratios.append(overlap/max(length,1e-30))
+     area_ratio=min(a['area'],b['area'])/max(a['area'],b['area'])
+     return min(ratios),area_ratio
+@@ -131,6 +183,29 @@
+             if i!=j:mask &= (z<ol)|(z>oh)
+         counts.append(float(weights[mask].sum()))
+     return np.asarray(counts)
++
++
++def _paired_row_by_center(front, back, row_ranges, tolerance):
++    """Geometric fallback only when the Z-row centers are distinguishable.
++
++    A row's projection can overlap another row without a wafer becoming a
++    member of both. The center is measured on the *paired* physical object.
++    Close centers or a central patch remain ambiguous instead of guessed.
++    """
++    if len(row_ranges)==1:
++        return 0
++    z=float((front['centroid_yz_m'][1]+back['centroid_yz_m'][1])*.5)
++    centers=np.asarray([.5*(lo+hi) for lo,hi in row_ranges],dtype=float)
++    distances=np.abs(centers-z)
++    order=np.argsort(distances)
++    if len(order)<2:return int(order[0])
++    width=min(front['z'][1]-front['z'][0],back['z'][1]-back['z'][0])
++    if (distances[order[1]]-distances[order[0]] <= max(tolerance*5,width*.08)
++            or abs(centers[order[1]]-centers[order[0]]) <= max(tolerance*10,width*.10)):
++        return None
++    if not (row_ranges[order[0]][0]-tolerance<=z<=row_ranges[order[0]][1]+tolerance):
++        return None
++    return int(order[0])
+ 
+ 
+ def _infer_thickness(patches,tol):
+@@ -165,8 +240,11 @@
+     a=np.asarray([p['area'] for p in patches]);med=float(np.median(a))
+     # Reject broad chamber end-walls and tiny independent supports by area.
+     keep=(a>=med*.23)&(a<=med*3.5)
+-    excluded=[{'x_m':p['x'],'reason':'non_repeating_patch_area'} for p,k in zip(patches,keep) if not k]
++    excluded=[{'x_m':p['x'],'area_m2':p['area'],'y_range_m':list(p['y']),
++               'z_range_m':list(p['z']),'reason':'non_repeating_patch_area'}
++              for p,k in zip(patches,keep) if not k]
+     p=[p for p,k in zip(patches,keep) if k]
++    _record(diagnostics, area_median_m2=med,area_acceptance_m2=[med*.23,med*3.5])
+     _record(diagnostics, patch_count_after_area_filter=int(len(p)),
+             area_filter_excluded_count=len(excluded),
+             area_filter_first_excluded=excluded[:8])
+@@ -188,7 +266,10 @@
+             distances=[abs(p[j]['x']-p[i]['x']) for j in neighbours]
+             _record(diagnostics, first_conflict_x_m=float(p[i]['x']),
+                     competing_thickness_m=[float(x) for x in distances],
+-                    rejected_by='nonunique_thickness_spatial_pairing')
++                    competing_patch_areas_m2=[float(p[j]['area']) for j in neighbours],
++                    candidate_patch_area_m2=float(p[i]['area']),
++                    rejected_by='nonunique_thickness_spatial_pairing',
++                    paired_wafer_count=int(len(pairs)) if 'pairs' in locals() else 0)
+             raise PatchRecognitionError('Multiple thickness-compatible front/back wall patches near X=%.9g m; possible thicknesses %s m' %
+                                         (p[i]['x'],[round(x,9) for x in distances]),
+                                         stage='physical_patch_pairing',diagnostics=diagnostics)
+@@ -199,11 +280,23 @@
+         if j in used:continue
+         first,second=p[min(i,j)],p[max(i,j)]
+         ev=_exclusive_evidence(first,row_ranges)+_exclusive_evidence(second,row_ranges)
+-        if len(row_ranges)==1:row=0
++        if len(row_ranges)==1:
++            row=0
+         elif ev.max()<=max(first['area'],second['area'])*.002:
+-            raise PatchRecognitionError('No unique row-edge evidence for complete wafer at X=%.9g m; add non-overlapping row search or review connectivity' % first['x'])
++            row=_paired_row_by_center(first,second,row_ranges,max(tlo*.03,1e-8))
++            if row is None:
++                _record(diagnostics,first_conflict_x_m=float(first['x']),
++                        candidate_patch_area_m2=[first['area'],second['area']],
++                        competing_row_centers_z_m=[float((lo+hi)*.5) for lo,hi in row_ranges],
++                        rejected_by='no_unique_row_evidence')
++                raise PatchRecognitionError('No unique Z row evidence for paired wafer at X=%.9g m' %first['x'],
++                                            stage='row_assignment',diagnostics=diagnostics)
+         elif np.count_nonzero(ev>ev.max()*.08)>1:
+-            raise PatchRecognitionError('A paired wafer has contradictory two-row exterior evidence near X=%.9g m' % first['x'])
++            _record(diagnostics,first_conflict_x_m=float(first['x']),
++                    candidate_patch_area_m2=[first['area'],second['area']],
++                    exclusive_row_area_m2=ev.tolist(),rejected_by='contradictory_row_evidence')
++            raise PatchRecognitionError('Contradictory Z-row exterior evidence at X=%.9g m' %first['x'],
++                                        stage='row_assignment',diagnostics=diagnostics)
+         else:row=int(np.argmax(ev))
+         pairs.append({'xlo':first['x'],'xhi':second['x'],'row':row,
+                       'ylo':max(first['y'][0],second['y'][0]),
+@@ -211,6 +304,8 @@
+                       'zlo':max(first['z'][0],second['z'][0]),
+                       'zhi':min(first['z'][1],second['z'][1])})
+         used.update((i,j))
++        _record(diagnostics,paired_wafer_count=int(len(pairs)),
++                interim_row_wafer_counts=[sum(q['row']==ri for q in pairs) for ri in range(len(row_ranges))])
+     # Two physically distinct wafers must not occupy the same X thickness
+     # interval *and* overlapping YZ footprint. This catches genuinely
+     # coincident solid panels while allowing aligned rows with disjoint Z.
+@@ -228,13 +323,25 @@
+                                             (first['xlo'],z_overlap),stage='row_assignment',diagnostics=diagnostics)
+     _record(diagnostics, paired_wafer_count=int(len(pairs)),stage='row_assignment')
+     if len(pairs)<min_plates*len(row_ranges):
+-        raise PatchRecognitionError('Confirmed wafer pairs below per-row minimum; found %d' % len(pairs),
++        unmatched=[(i,c) for i,c in enumerate(p) if i not in used]
++        first=unmatched[0][1] if unmatched else None
++        _record(diagnostics,paired_wafer_count=len(pairs),
++                unmatched_candidate_count=len(unmatched),
++                first_conflict_x_m=float(first['x']) if first is not None else None,
++                candidate_patch_area_m2=float(first['area']) if first is not None else None,
++                rejected_by='insufficient_unique_thickness_pairs')
++        raise PatchRecognitionError('Confirmed wafer pairs below per-row minimum; found %d, unmatched=%d' %
++                                    (len(pairs),len(unmatched)),
+                                     stage='physical_patch_pairing',diagnostics=diagnostics)
+     rows=[]
+     for row in range(len(row_ranges)):
+         plate=sorted((q for q in pairs if q['row']==row),key=lambda q:q['xlo'])
+         if len(plate)<min_plates:
+-            raise PatchRecognitionError('Row %d has only %d physical wafer pairs' % (row+1,len(plate)))
++            _record(diagnostics,first_conflict_row=row+1,paired_wafer_count=len(pairs),
++                    identified_row_wafer_counts=[sum(q['row']==ri for q in pairs) for ri in range(len(row_ranges))],
++                    rejected_by='insufficient_row_wafers')
++            raise PatchRecognitionError('Row %d has only %d physical wafer pairs' % (row+1,len(plate)),
++                                        stage='row_assignment',diagnostics=diagnostics)
+         spacing=np.diff([q['xlo'] for q in plate])
+         core=float(np.median(spacing)) if len(spacing) else 0.
+         # Disconnected one-off structural planes are NOT appended as wafers.
+@@ -250,6 +357,7 @@
+         if len(valid)>1:
+             raise PatchRecognitionError('Multiple plausible repeated wafer arrays in row %d; narrow wafer_x_range_m' %(row+1))
+         chosen=valid[0]
++        _record(diagnostics,identified_row_wafer_counts=[sum(q['row']==ri for q in pairs) for ri in range(len(row_ranges))])
+         dropped=[q for q in plate if q not in chosen]
+         for q in dropped:excluded.append({'x_m':q['xlo'],'reason':'isolated_paired_patch_outside_repeated_array'})
+         for q in chosen:
+@@ -265,9 +373,19 @@
+         else:
+             regular=(gap>=regular_gap_range[0])&(gap<=regular_gap_range[1])
+         if int(regular.sum())<max(2,int(len(gap)*.55)):
+-            raise PatchRecognitionError('Row %d has too few regular measured wafer gaps' % (row+1))
++            _record(diagnostics,first_conflict_row=row+1,
++                    first_conflict_x_m=float(lo[np.flatnonzero(~regular)[0]]) if np.any(~regular) else None,
++                    rejected_by='too_few_regular_same_row_gaps')
++            raise PatchRecognitionError('Row %d has too few regular measured wafer gaps' % (row+1),
++                                        stage='channel_generation',diagnostics=diagnostics)
+         if np.any(gap<gap_ref*.65):
+-            raise PatchRecognitionError('Row %d contains narrow unclassified physical gap at X=%.9g m' %(row+1,lo[int(np.argmin(gap))]))
++            gap_index=int(np.argmin(gap))
++            _record(diagnostics,first_conflict_row=row+1,
++                    first_conflict_x_m=float(lo[gap_index]),
++                    conflicting_gap_m=float(gap[gap_index]),
++                    rejected_by='narrow_same_row_gap')
++            raise PatchRecognitionError('Row %d contains narrow unclassified physical gap at X=%.9g m' %(row+1,lo[gap_index]),
++                                        stage='channel_generation',diagnostics=diagnostics)
+         rows.append({'face_positions_lo_m':lo.tolist(),'face_positions_hi_m':hi.tolist(),
+                      'plate_count':len(lo),'plate_thickness_m':float(np.median(hi-lo)),
+                      'gap_width_m':gap.tolist(),'regular_gap_index':np.flatnonzero(regular).tolist(),
+@@ -297,7 +415,12 @@
+                 if same_z and any(abs(patch['x']-expect)<max(tlo*.30,1e-7) for expect in predicted):
+                     within=True
+             if within:
+-                raise PatchRecognitionError('Unpaired wafer-sized wall patch near identified array at X=%.9g m; missing front/back face is plausible' %patch['x'])
++                _record(diagnostics,first_conflict_x_m=float(patch['x']),
++                        candidate_patch_area_m2=float(patch['area']),
++                        rejected_by='unpaired_patch_inside_repeated_array',
++                        unmatched_candidate_count=len(p)-len(used))
++                raise PatchRecognitionError('Unpaired wafer-sized wall patch near identified array at X=%.9g m; missing front/back face is plausible' %patch['x'],
++                                            stage='physical_patch_pairing',diagnostics=diagnostics)
+             excluded.append({'x_m':patch['x'],'reason':'unpaired_outside_repeated_array'})
+     if x_range:
+         for patch in p:
+--- a/worker/af_adaptive_geometry.py
++++ b/worker/af_adaptive_geometry.py
+@@ -136,6 +136,28 @@
+     return t[valid],center[valid],area[valid],tol
+ 
+ 
++def _patch_centroid_split(patches, *, axis, min_panels, tol):
++    """Detect two repeated spatial bands without weighting broad support walls.
++
++    Use a genuine gap between connected patch centroids and require many panels
++    on either side; the separation must be material compared to panel width.
++    """
++    import numpy as np
++    index=0 if axis=='y' else 1
++    vals=np.asarray([p['centroid_yz_m'][index] for p in patches],float)
++    if len(vals)<2*min_panels:return None
++    order=np.argsort(vals)
++    sorted_vals=vals[order]
++    gaps=np.diff(sorted_vals)
++    if not len(gaps):return None
++    width=np.median([p[axis][1]-p[axis][0] for p in patches])
++    eligible=np.arange(min_panels-1,len(gaps)-min_panels+1)
++    if not len(eligible):return None
++    k=int(eligible[np.argmax(gaps[eligible])])
++    if gaps[k]<=max(tol*10,width*.4):return None
++    return float((sorted_vals[k]+sorted_vals[k+1])*.5)
++
++
+ def identify_from_wall_triangles(triangles, *, min_plates=5, require_two_layers=False):
+     """Auto-recognize genuine connected wafer panels, not X positions alone.
+ 
+@@ -158,45 +180,73 @@
+     v=v[good];ctr=ctr[good];area=area[good]
+     if len(v)<min_plates*4:
+         raise GeometryAmbiguous('Too few measured X-normal wafer wall triangles')
+-    split_y=_bins_minimum_split(ctr[:,1],area)
++    # Patch identities, rather than unrelated triangle counts, provide the
++    # layer/row hypotheses. A broad X-normal chamber end wall must not shift
++    # the histogram or enlarge the measured wafer array's Z bounds.
++    search_diag={'mode':'automatic'}
++    try:
++        physical_patches=extract_patches(v,tol=tol,y_range=(-float('inf'),float('inf')),
++                                         diagnostics=search_diag)
++    except PatchRecognitionError as exc:
++        raise GeometryAmbiguous('Automatic candidate extraction: '+str(exc),
++                                stage=exc.stage,diagnostics=exc.diagnostics) from exc
++    patch_areas=np.asarray([p['area'] for p in physical_patches])
++    reference_area=float(np.median(patch_areas))
++    plausible=[p for p in physical_patches if reference_area*.23<=p['area']<=reference_area*3.5]
++    search_diag['area_rejected_patch_count']=len(physical_patches)-len(plausible)
++    search_diag['candidate_patch_count']=len(plausible)
++    if len(plausible)<2*min_plates:
++        raise GeometryAmbiguous('No repeating wafer-sized wall patches after broad-wall filter',
++                                stage='wall_candidate_screening',diagnostics=search_diag)
++    py=np.asarray([p['centroid_yz_m'][0] for p in plausible]);pa=np.asarray([p['area'] for p in plausible])
++    split_y=_patch_centroid_split(plausible,axis='y',min_panels=min_plates*2,tol=tol)
+     if require_two_layers and split_y is None:
+-        raise GeometryAmbiguous('Unable to distinguish two wafer layers')
++        raise GeometryAmbiguous('Unable to distinguish two wafer layers from connected panels',
++                                stage='layer_assignment',diagnostics=search_diag)
+     ybands=[(float('-inf'),split_y),(split_y,float('inf'))] if split_y is not None else [(float('-inf'),float('inf'))]
+     layers=[]
+     for ya,yb in ybands:
+-        diagnostic={'layer_id':len(layers)+1,'y_range_m':[float(v) if math.isfinite(v) else None for v in (ya,yb)]}
+-        try:
+-            patches=extract_patches(v,tol=tol,y_range=(ya,yb),diagnostics=diagnostic)
+-        except PatchRecognitionError as exc:
+-            raise GeometryAmbiguous('Auto wall patch recognition failed: '+str(exc),
+-                                    stage=exc.stage,diagnostics={**diagnostic,**exc.diagnostics}) from exc
+-        # Z row hypothesis is learned from actual disconnected panel shapes,
+-        # not from coincident X station counts. Each intact panel is assigned
+-        # once, even when two rows share all X positions.
+-        zmid=np.asarray([.5*(p['z'][0]+p['z'][1]) for p in patches])
+-        za=np.asarray([p['area'] for p in patches])
+-        split_z=_bins_minimum_split(ctr[(ctr[:,1]>=ya)&(ctr[:,1]<yb),2],
+-                                    area[(ctr[:,1]>=ya)&(ctr[:,1]<yb)],imbalance_limit=.27)
++        diagnostic={'layer_id':len(layers)+1,
++                    'y_range_m':[float(v) if math.isfinite(v) else None for v in (ya,yb)],
++                    'global_patch_screening':search_diag}
++        patches=[p for p in physical_patches if ya<=p['centroid_yz_m'][0]<yb]
++        diagnostic['connected_patch_count']=len(patches)
++        if len(patches)<min_plates*2:
++            raise GeometryAmbiguous('Auto layer has too few connected wall panels',
++                                    stage='layer_assignment',diagnostics=diagnostic)
++        row_patches=[p for p in patches if reference_area*.23<=p['area']<=reference_area*3.5]
++        if not row_patches:
++            raise GeometryAmbiguous('Auto layer contains no repeating wafer-sized panels',
++                                    stage='row_assignment',diagnostics=diagnostic)
++        # Only measured, plausible panel centers contribute to the two-row
++        # hypothesis; a separate chamber end wall cannot expand a Z bound.
++        zmid=np.asarray([p['centroid_yz_m'][1] for p in row_patches])
++        za=np.asarray([p['area'] for p in row_patches])
++        split_z=_patch_centroid_split(row_patches,axis='z',min_panels=min_plates*2,tol=tol)
+         if split_z is None:
+-            # Repeated two-band footprints may overlap in Z even when their
+-            # area histograms have no valley; refuse to invent a flux divider.
+-            widths=np.asarray([p['z'][1]-p['z'][0] for p in patches])
++            widths=np.asarray([p['z'][1]-p['z'][0] for p in row_patches])
+             m=float(np.median(widths))
+-            median=float(np.median(zmid));a=zmid[zmid<median];b=zmid[zmid>median]
+-            if len(a)>=min_plates*2 and len(b)>=min_plates*2:
+-                if float(np.median(b)-np.median(a))>m*.40:
+-                    raise GeometryAmbiguous('Two candidate Z wafer-row footprints overlap or lack a unique split; provide row z_range_m and overlap_split_z_m configuration')
+-            row_ranges=[(float(zmid.min()-max(m,tol)),float(zmid.max()+max(m,tol)))]
++            median=float(np.median(zmid));low=zmid[zmid<median];high=zmid[zmid>median]
++            if len(low)>=min_plates*2 and len(high)>=min_plates*2:
++                if float(np.median(high)-np.median(low))>m*.40:
++                    raise GeometryAmbiguous('Auto row projections overlap or have no unique Z split; provide row ranges and overlap_split_z_m',
++                                            stage='row_assignment',diagnostics=diagnostic)
++            row_ranges=[(float(min(p['z'][0] for p in row_patches)),
++                         float(max(p['z'][1] for p in row_patches)))]
+         else:
+-            lower=[p for p in patches if .5*(p['z'][0]+p['z'][1])<split_z]
+-            upper=[p for p in patches if .5*(p['z'][0]+p['z'][1])>=split_z]
++            lower=[p for p in row_patches if p['centroid_yz_m'][1]<split_z]
++            upper=[p for p in row_patches if p['centroid_yz_m'][1]>=split_z]
+             if len(lower)<min_plates*2 or len(upper)<min_plates*2:
+-                raise GeometryAmbiguous('Area Z split produced too few complete row panels')
++                raise GeometryAmbiguous('Auto Z split has too few real wall panels',
++                                        stage='row_assignment',diagnostics=diagnostic)
+             lo=(min(p['z'][0] for p in lower),max(p['z'][1] for p in lower))
+             hi=(min(p['z'][0] for p in upper),max(p['z'][1] for p in upper))
+             if lo[1]>=hi[0]:
+-                raise GeometryAmbiguous('Auto Z row bounds overlap; need explicit Z partition configuration')
++                diagnostic['overlap_conflict_z_m']=[float(lo[1]),float(hi[0])]
++                raise GeometryAmbiguous('Auto Z-row projections overlap; provide explicit row Z bounds and flux split',
++                                        stage='row_assignment',diagnostics=diagnostic)
+             row_ranges=[lo,hi]
++        diagnostic['hypothesized_row_z_ranges_m']=[[float(a),float(b)] for a,b in row_ranges]
+         try:
+             thickness=_infer_thickness(patches,tol)
+             rows,evidence=pair_wafer_patches(patches,thickness_range=thickness,
+--- a/worker/af_adaptive_native.py
++++ b/worker/af_adaptive_native.py
+@@ -856,7 +856,9 @@
+             'baffle':envelope('baffle',{
+                 'hole_count':baffle.get('hole_count'), 'hole_row_count':baffle.get('hole_row_count'),
+                 'hole_cv_pct':baffle.get('all_hole_cv_pct'),
+-                'board_edge_net_kg_s':baffle.get('board_edge_net_kg_s')},
++                'board_edge_net_kg_s':baffle.get('board_edge_net_kg_s'),
++                'whole_cut_net_kg_s':baffle.get('whole_cut_net_kg_s'),
++                'opening_identity_status':baffle.get('status')},
+                 {'cut_closure_error_kg_s':baffle.get('board_cut_closure_error_kg_s'),
+                  'expected_hole_check':baffle.get('expected_hole_check','not_configured')}),
+             'wafer_geometry':envelope('wafer_geometry',{
+@@ -920,7 +922,9 @@
+             'port_flux':{'status':'completed','source':'CFF native Face ID'},
+             'port_pressure':{'status':'completed' if pressure.get('status','').startswith('computed_') else 'not_available',
+                              'reason':pressure.get('reason','')},
+-            'baffle':{'status':'completed' if baffle.get('status')=='geometry_candidate_holes_native_flux_computed' else 'not_available',
++            'baffle':{'status':('completed' if baffle.get('status')=='geometry_candidate_holes_native_flux_computed'
++                                 else 'partial' if baffle.get('whole_cut_net_kg_s') is not None
++                                 else 'not_available'),
+                       'reason':baffle.get('reason',baffle.get('expected_hole_check',''))},
+             'wafer_geometry':{'status':'not_executed'},
+             'wafer_partition_and_bypass':{'status':'not_executed'},
+@@ -1207,6 +1211,28 @@
+     return cells
+ 
+ 
++def _baffle_outlet_y(mesh, config=None):
++    """Only an actual outlet boundary zone may be used to rank plates.
++
++    No outlet evidence means no proximity-based auto-pick. Reading a bounded
++    sample avoids holding all port triangles in an additional copy.
++    """
++    import numpy as np
++    zones=mesh.get('zones') or []
++    conn=mesh.get('conn');xyz=mesh.get('xyz')
++    if conn is None or xyz is None:return None
++    named={s.lower() for s in ((config or {}).get('ports') or {}).get('outlet_zones',[])}
++    values=[]
++    for name,a,b in zones:
++        label=str(name).lower()
++        is_outlet=label in named if named else ('outlet' in label)
++        if not is_outlet or b<=a:continue
++        indices=np.linspace(a,b-1,min(512,b-a),dtype=np.int64)
++        if indices.max()>=len(conn) or np.any(conn[indices]<0):continue
++        values.append(float(np.mean(xyz[conn[indices],1])))
++    return float(np.mean(values)) if values else None
++
++
+ def _baffle_plenum_candidates(mesh,centroids,df,config=None):
+     """Physical plate openings first, native staircase cut pieces second.
+ 
+@@ -1226,30 +1252,68 @@
+     area=np.linalg.norm(np.cross(tri[:,1]-tri[:,0],tri[:,2]-tri[:,0]),axis=1)*.5
+     from af_adaptive_geometry import _station_groups
+     ys,areas=_station_groups(centers[:,1],area,tol)
++    outlet_y=_baffle_outlet_y(mesh,config)
++    diagnostics['outlet_boundary_y_m']=outlet_y
+     diagnostics['horizontal_wall_stations']=[{'y_m':float(y),'wall_area_m2':float(a)} for y,a in zip(ys,areas)]
+     if len(ys)<3:
+         return {'status':'not_identified','reason':'Fewer than three horizontal wall planes','diagnostics':diagnostics}
+     significant=areas>=max(float(np.max(areas))*.08,float(np.median(areas))*.8)
+     pos=np.sort(ys[significant]);candidates=[]
++    # Store actual planar XZ extents/area, not only Y positions. An unrelated
++    # chamber plane may be near a plate but not have matching coverage.
++    plane_evidence={}
++    for y in pos:
++        mask=np.abs(centers[:,1]-y)<=tol*2
++        planar=tri[mask]
++        if len(planar)==0:continue
++        xz=planar[:,:,[0,2]].reshape(-1,2)
++        plane_evidence[float(y)]={'area_m2':float(area[mask].sum()),
++                                  'bbox_xz_m':[float(xz[:,0].min()),float(xz[:,0].max()),
++                                               float(xz[:,1].min()),float(xz[:,1].max())]}
+     bound=(config or {}).get('measurement',{}).get('baffle_y_range_m')
+     for j in range(1,len(pos)-1):
+         floor,low,high=map(float,pos[j-1:j+2])
+         gap=low-floor;thick=high-low
+         if thick<=0 or gap/thick<3:continue
+         selected=(bound is None or (bound[0]<=low and high<=bound[1]))
++        pa,pb=plane_evidence[low],plane_evidence[high]
++        ax0,ax1,az0,az1=pa['bbox_xz_m'];bx0,bx1,bz0,bz1=pb['bbox_xz_m']
++        overlap=max(0,min(ax1,bx1)-max(ax0,bx0))*max(0,min(az1,bz1)-max(az0,bz0))
++        amin=min((ax1-ax0)*(az1-az0),(bx1-bx0)*(bz1-bz0))
++        cover_ratio=overlap/max(amin,1e-30)
++        plane_ratio=min(pa['area_m2'],pb['area_m2'])/max(pa['area_m2'],pb['area_m2'])
++        matching=plane_ratio>=.55 and cover_ratio>=.70
+         candidates.append({'floor_y_m':floor,'lower_y_m':low,'upper_y_m':high,
+                            'thickness_m':thick,'lower_clearance_m':gap,
+-                           'clearance_thickness_ratio':gap/thick,'selected_by_config':bool(selected)})
++                           'clearance_thickness_ratio':gap/thick,
++                           'lower_wall_area_m2':pa['area_m2'],
++                           'upper_wall_area_m2':pb['area_m2'],
++                           'area_ratio':float(plane_ratio),
++                           'xz_coverage_overlap_ratio':float(cover_ratio),
++                           'matching_plate_faces':bool(matching),
++                           'outlet_distance_m':abs((low+high)*.5-outlet_y) if outlet_y is not None else None,
++                           'selected_by_config':bool(selected)})
+     diagnostics['plate_candidates']=candidates
+-    eligible=[c for c in candidates if c['selected_by_config']]
++    eligible=[c for c in candidates if c['selected_by_config'] and c['matching_plate_faces']]
++    diagnostics['rejected_candidate_count']=len(candidates)-len(eligible)
+     if not eligible:
+         return {'status':'not_identified','reason':'No plate-floor pair matches geometry constraints',
+                 'diagnostics':diagnostics}
+     if len(eligible)>1:
+-        return {'status':'plate_candidate_ambiguous',
+-                'reason':'Multiple plausible plate face pairs; narrow measurement.baffle_y_range_m',
+-                'diagnostics':diagnostics}
++        # The outlet-side plate is preferred only if the observed outlet is
++        # markedly nearer to one candidate. Close distances remain ambiguous.
++        ranked=sorted(eligible,key=lambda c:c['outlet_distance_m'] if outlet_y is not None else 0)
++        if (outlet_y is not None and ranked[1]['outlet_distance_m']>0 and
++                ranked[0]['outlet_distance_m']<.45*ranked[1]['outlet_distance_m']):
++            eligible=[ranked[0]]
++            diagnostics['selection_basis']='unambiguous_nearest_measured_outlet_boundary'
++        else:
++            return {'status':'plate_candidate_ambiguous',
++                    'reason':'Multiple plausible plate face pairs; outlet proximity insufficient or unknown; narrow measurement.baffle_y_range_m',
++                    'diagnostics':diagnostics}
+     chosen=eligible[0]
++    diagnostics['selected_plate']=dict(chosen)
++    diagnostics.setdefault('selection_basis','unique_matching_plate_surfaces')
+     floor,low,high=chosen['floor_y_m'],chosen['lower_y_m'],chosen['upper_y_m']
+     cut=(low+high)*.5
+     face_a=find_planar_openings(tri,low,tol)
+--- a/worker/af_h5_offline.py
++++ b/worker/af_h5_offline.py
+@@ -508,6 +508,23 @@
+         if config is not None:
+             result['config_mode']='explicit_only'
+             result['config_file']=str(Path(args.config).expanduser().resolve())
++        # Pairing, geometry and export are distinct facts. A blocked geometry
++        # result must not imply a corrupt Case/Data pair. Preserve status in
++        # the indexed JSON and make it available to native UI/logs.
++        physical_state=result.get('physical_analysis_status','not_computed')
++        wafer_stage=((result.get('module_results') or {}).get('wafer_geometry') or {})
++        blocker=result.get('first_full_analysis_blocker') or {}
++        export_state=result.get('report_save_status','not_executed')
++        result['stage_statuses']={
++            'file_pairing':{'status':'completed','case':str(input_case),'data':str(input_data),
++                            'note':'paired file paths resolved; shared mesh identity still depends on native index checks'},
++            'wafer_geometry':{'status':wafer_stage.get('status',
++                'completed' if physical_state in ('native_11_9_profile_computed','adaptive_native_candidate_computed')
++                else 'not_verified'),
++                'stage':blocker.get('stage'), 'reason':wafer_stage.get('reason',blocker.get('reason',''))},
++            'report_publication':{'status':'failed' if export_state=='failed' else
++                 'completed' if result.get('html_file') else 'not_executed',
++                 'reason':((result.get('export_error') or {}).get('reason',''))}}
+         if args.output_dir and result.get('physical_analysis_status') in ('native_11_9_profile_computed','adaptive_native_candidate_computed'):
+             result['index_file'] = str(safe_save(result,args.output_dir))
+         elif args.output_dir:
+--- a/worker/af_report_v3.py
++++ b/worker/af_report_v3.py
+@@ -531,7 +531,7 @@
+     port_pressure=partial.get('pressure') or {}
+     blockers=result.get('first_full_analysis_blocker') or {}
+     module_results=result.get('module_results') or {}
+-    head_status=('部分完成 · 晶圆壁面配对待复核' if partial and (
++    head_status=('部分完成 · 晶圆几何待复核' if partial and (
+         (blockers.get('stage') or '').startswith('wafer_') or
+         (blockers.get('pipeline_stage') or '').startswith('wafer_') or
+         blockers.get('stage') in ('physical_patch_pairing','row_assignment','expected_model_validation',
+--- a/cmd/autofluent/main_windows.go
++++ b/cmd/autofluent/main_windows.go
+@@ -1376,7 +1376,7 @@
+ 		} else if result["physical_analysis_status"] == "adaptive_native_candidate_computed" {
+ 			status = "自适应物理候选完成（分区待验证）"
+ 		} else if result["physical_analysis_status"] == "partial_physical_metrics" {
+-			status = "部分完成 · 晶圆壁面配对待复核"
++			status = "部分完成 · 晶圆几何待复核"
+ 		}
+ 		u.app.record("h5-inspect", status, fmt.Sprint(e))
+ 		select {
+@@ -1908,7 +1908,7 @@
+ 						}
+ 					}
+ 				} else if c.result["physical_analysis_status"] == "partial_physical_metrics" {
+-					setText(u.status, "部分完成 · 晶圆壁面配对待复核")
++					setText(u.status, "部分完成 · 晶圆几何待复核")
+ 					if blocker, ok := c.result["first_full_analysis_blocker"].(map[string]any); ok {
+ 						u.log(fmt.Sprintf("【晶圆几何待复核】阶段：%v；原因：%v。端口和挡板结果仍可打开查看。",
+ 							blocker["stage"], blocker["reason"]))
+@@ -1923,6 +1923,23 @@
+ 					setText(u.status, "H5 全局原生通量已映射 · 片间测量待完成")
+ 				} else {
+ 					setText(u.status, "H5 已读取 · 片间测量面未取得")
++				}
++				// Report each gate independently, even when other physical metrics succeeded.
++				if stages, ok := c.result["stage_statuses"].(map[string]any); ok {
++					for _, step := range []struct{ key, title string }{
++						{"file_pairing", "Case/Data 配对"},
++						{"wafer_geometry", "晶圆几何"},
++						{"report_publication", "HTML 报告保存"},
++					} {
++						if item, ok := stages[step.key].(map[string]any); ok {
++							u.log(fmt.Sprintf("【%s】状态：%v；阶段：%v；原因：%v",
++								step.title, item["status"], item["stage"], item["reason"]))
++						}
++					}
++				}
++				if c.result["report_save_status"] == "failed" {
++					// Do not allow the wafer status to overwrite export failure.
++					setText(u.status, "计算结果已保留 · HTML 保存失败，可仅重试导出")
+ 				}
+ 				if c.result["physical_analysis_status"] != "native_11_9_profile_computed" && c.result["physical_analysis_status"] != "adaptive_native_candidate_computed" {
+ 					u.log(fmt.Sprintf("【网格/原生通量自检】CFF：%v\r\n全局 Face ID 映射：%v\r\n单元守恒：%v\r\n通过这些检查仍不能证明已完成晶圆片间/旁路分析。", cff["status"], globalFlux["status"], cellBalance["status"]))
+--- a/tests/test_v2103_wafer_partials.py
++++ b/tests/test_v2103_wafer_partials.py
+@@ -112,7 +112,7 @@
+     assert not r['layers']
+     assert r['first_full_analysis_blocker']['stage']=='wafer_wall_pairing'
+     html=Path(ret['html_file']).read_text(encoding='utf-8')
+-    assert '部分完成 · 晶圆壁面配对待复核' in html
++    assert '部分完成 · 晶圆几何待复核' in html
+     assert '3 孔' in html
+     assert 'front/back match ambiguous' in html
+     assert '未取得' in html
+@@ -137,7 +137,7 @@
+     assert out['derived_metrics']['mass_imbalance_pct']==pytest.approx(0.)
+     assert 'expected.wafer_count' in out['first_full_analysis_blocker']['reason']
+     assert Path(out['html_file']).is_file()
+-    assert '部分完成 · 晶圆壁面配对待复核' in Path(out['html_file']).read_text(encoding='utf-8')
++    assert '部分完成 · 晶圆几何待复核' in Path(out['html_file']).read_text(encoding='utf-8')
+     assert Path(out['analysis_json']).is_file()
+     assert not out['derived_metrics'].get('layers')
+ 
+--- a/tests/test_v2105_patch_first_geometry.py
++++ b/tests/test_v2105_patch_first_geometry.py
+@@ -0,0 +1,184 @@
++"""V2.10.5: patch-first wall matching, outlet-aware baffle, and partial-report gates.
++
++Synthetic geometry and native-flux regression only; NOT a real FFF acceptance.
++"""
++import sys
++from pathlib import Path
++import numpy as np
++import pytest
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT/'worker'))
++from af_adaptive_geometry import (identify_from_wall_triangles,
++    identify_from_configured_wall_triangles,partition_cut_faces,GeometryAmbiguous)
++from af_model_config import validate_model_config
++from test_adaptive_geometry import rectangles
++from test_v211_overlap_and_pairing import _config,_overlapping_wafer_triangles
++from test_v2104_failtrace_baffle_export import plate
++
++
++def _two_tris(x,ylo,yhi,zlo,zhi):
++    return np.asarray([[[x,ylo,zlo],[x,yhi,zlo],[x,yhi,zhi]],
++                       [[x,ylo,zlo],[x,yhi,zhi],[x,ylo,zhi]]],float)
++
++
++def test_auto_aligned_rows_discard_big_end_wall_and_tiny_support_without_expanding_z():
++    good=rectangles(n=8,layers=1,wide_gap=False,shifted=False)
++    end_wall=_two_tris(-.21,-.8,-.1,-.03,.8)
++    support=_two_tris(.3,-.36,-.35,.20,.205)
++    geo=identify_from_wall_triangles(np.concatenate((good,end_wall,support)))
++    assert geo['total_plates']==16 and geo['total_channels']==14
++    r0,r1=geo['layers'][0]['rows']
++    assert r0['z_max_m']<r1['z_min_m']
++    assert r0['z_min_m']>=.12 and r1['z_max_m']<.5
++    d=geo['layers'][0]['wafer_pairing_diagnostics']['pipeline']
++    assert d['global_patch_screening']['area_rejected_patch_count']>=2
++    assert d['connected_patch_count']>=32
++    assert d['identified_row_wafer_counts']==[8,8]
++    assert d['identified_row_channel_counts']==[7,7]
++
++
++def test_shared_x_two_rows_keep_separate_patch_metadata():
++    from af_wafer_patches import extract_patches
++    good=rectangles(n=7,layers=1,wide_gap=False,shifted=False)
++    diag={}
++    patch=extract_patches(good,tol=1e-7,y_range=(-1,1),diagnostics=diag)
++    assert len(patch)==28
++    assert any(n==2 for n in diag['connected_patches_per_x_station'].values())
++    assert all(len(p['centroid_yz_m'])==2 for p in patch)
++    assert all(p['area']>0 for p in patch)
++
++
++def test_staggered_overlapping_projection_each_channel_obeys_own_row_boundaries():
++    cfg=validate_model_config(_config())
++    geo=identify_from_configured_wall_triangles(_overlapping_wafer_triangles(),cfg)
++    assert geo['total_plates']==16 and geo['total_channels']==14
++    l=geo['layers'][0]
++    coords=[];flow=[]
++    for index,row in enumerate(l['rows']):
++        for k in row['regular_gap_index']:
++            coords.append([.5*(row['face_positions_hi_m'][k]+row['face_positions_lo_m'][k+1]),
++                           l['y_cut_m'], -.235 if index==0 else -.165])
++            flow.append(1e-8*(index+1)*(k+1))
++    result=partition_cut_faces(coords,flow,l)
++    assert len(result['channels'])==14
++    assert [c['net_kg_s'] for c in result['channels']]==pytest.approx(flow)
++    assert sum(x['face_count'] for x in result['channels'])==14
++    assert result['closure_error_kg_s']==pytest.approx(0)
++
++
++def test_unpaired_wall_failure_has_first_conflict_coordinate_and_rule():
++    good=rectangles(n=8,layers=1,wide_gap=False,shifted=False)
++    missing=good[~np.isclose(good[:,:,0].mean(axis=1),.008)]
++    with pytest.raises(GeometryAmbiguous) as err:
++        identify_from_wall_triangles(missing)
++    assert err.value.stage
++    diag=err.value.diagnostics
++    assert diag.get('connected_patch_count',0)>0
++    assert diag.get('paired_wafer_count',0)>=0
++
++
++def test_two_valid_baffle_candidates_have_area_and_outlet_distance_diagnostics(monkeypatch):
++    import af_adaptive_native as n
++    tr=np.concatenate([plate(y) for y in (-.1,-.08,-.079,-.07,-.05,-.049)])
++    monkeypatch.setattr(n,'_horizontal_wall_triangles',lambda m:tr)
++    # One real outlet-boundary mesh face 0.086 m below zero; no internal cut
++    xyz=np.asarray([[0,-.086,0],[.01,-.086,0],[0,-.086,.01]])
++    mesh={'xyz':xyz,'conn':np.asarray([[0,1,2]]),
++          'zones':[('outlet',0,1)],'inside':np.asarray([],int),
++          'owner':np.asarray([],int),'neighbors':np.asarray([],int),
++          'flux':np.asarray([])}
++    r=n._baffle_plenum_candidates(mesh,np.zeros((3,3)),{})
++    assert r['status']=='hole_outline_unverified'
++    d=r['diagnostics']
++    assert d['selection_basis']=='unambiguous_nearest_measured_outlet_boundary'
++    assert d['selected_plate']['lower_y_m']==pytest.approx(-.08)
++    assert all('area_ratio' in c and 'xz_coverage_overlap_ratio' in c for c in d['plate_candidates'])
++
++
++def test_baffle_ambiguous_without_outlet_evidence_remains_unverified(monkeypatch):
++    import af_adaptive_native as n
++    tr=np.concatenate([plate(y) for y in (-.1,-.08,-.079,-.07,-.05,-.049)])
++    monkeypatch.setattr(n,'_horizontal_wall_triangles',lambda m:tr)
++    r=n._baffle_plenum_candidates({'xyz':np.asarray([[0,-.1,0],[.08,-.049,.08]])},None,None)
++    assert r['status']=='plate_candidate_ambiguous'
++    assert len(r['diagnostics']['plate_candidates'])>=2
++
++
++def test_partial_wafer_failure_has_readable_report_without_invented_cv(tmp_path):
++    from test_adaptive_full_cff import build_synthetic_ald_pair
++    import af_adaptive_native as n
++    from af_report_v3 import render_inspection_report
++    case,data=build_synthetic_ald_pair(tmp_path,nplates=8)
++    config=_config()
++    config['expected']['wafer_count']=999
++    from af_model_config import validate_model_config
++    # Config's ranges do not match the synthetic H5: geometry blocks, but ports
++    # remain measured. The emitted HTML and JSON must retain port values.
++    r=n.try_adaptive_native(case,data,tmp_path/'reports',config=validate_model_config(config))
++    assert r['metrics']['status']=='partial_physical_metrics'
++    assert r['metrics']['port_flux']['inlet_kg_s']!=0
++    assert r['metrics']['first_full_analysis_blocker']['reason']
++    assert Path(r['html_file']).exists()
++    html=Path(r['html_file']).read_text(encoding='utf8')
++    assert '部分完成 · 晶圆几何待复核' in html
++    assert '首个实际阻塞' in html
++
++
++def test_tiny_coplanar_boundary_fragment_rejoined_but_disjoint_rows_not_merged():
++    from af_wafer_patches import extract_patches
++    original=rectangles(n=7,layers=1,wide_gap=False)
++    mask=np.isclose(original[:,:,0].mean(axis=1),0)&(original[:,:,2].mean(axis=1)<.23)
++    # Replace first X-side panel by a large panel and narrow disconnected
++    # seam fragment, separated by only 2 mesh-coordinate tolerances.
++    old=original[~mask]
++    panel=np.concatenate([_two_tris(0,.04,.1399998,.12,.22),
++                          _two_tris(0,.14,.15,.12,.22)])
++    diag={}
++    patches=extract_patches(np.concatenate([old,panel]),tol=1e-7,y_range=(0,.2),diagnostics=diag)
++    assert diag['merged_boundary_fragment_count']==1
++    assert len(patches)==28
++    at_x0=[p for p in patches if abs(p['x'])<1e-7]
++    assert len(at_x0)==2   # Not joined across the physical row separation
++    assert sum(p['area'] for p in at_x0)==pytest.approx(.022,rel=1e-4)
++
++
++def test_uncertain_fragment_not_merged_between_two_complete_rows():
++    from af_wafer_patches import extract_patches
++    good=rectangles(n=7,layers=1,wide_gap=False)
++    diag={}
++    patches=extract_patches(good,tol=1e-7,y_range=(-1,1),diagnostics=diag)
++    assert len(patches)==28
++    assert diag['merged_boundary_fragment_count']==0
++
++
++def test_cli_records_file_geometry_and_export_separate_statuses(tmp_path):
++    import json,subprocess
++    from test_adaptive_full_cff import build_synthetic_ald_pair
++    case,data=build_synthetic_ald_pair(tmp_path,nplates=8,staggered=True,two_layers=True)
++    config=json.loads((ROOT/'templates/geometry_config_example_staggered.json').read_text('utf-8'))
++    config['expected']['wafer_count']=999
++    cf=tmp_path/'config.json';cf.write_text(json.dumps(config),encoding='utf-8')
++    result=subprocess.run([sys.executable,str(ROOT/'worker/af_h5_offline.py'),
++                           '--file',str(data),'--config',str(cf),
++                           '--output-dir',str(tmp_path/'index'),'--skip-pyfluent'],
++                          capture_output=True,text=True,check=True)
++    parsed=json.loads(result.stdout)
++    stages=parsed['stage_statuses']
++    assert stages['file_pairing']['status']=='completed'
++    assert stages['wafer_geometry']['status']=='blocked'
++    assert stages['report_publication']['status']=='completed'
++    assert parsed['physical_analysis_status']=='partial_physical_metrics'
++    saved=json.loads(Path(parsed['index_file']).read_text('utf-8'))
++    assert saved['stage_statuses']['wafer_geometry']['status']=='blocked'
++
++
++def test_partial_projection_support_not_a_valid_front_back_wall_pair():
++    from af_wafer_patches import _footprint_similarity
++    face={'area':.01,'y':(.04,.14),'z':(.12,.22)}
++    # Large enough that simple area cutoff would not filter it, but projected
++    # bounds differ materially; matching by overlap/smaller-length is unsafe.
++    support={'area':.006,'y':(.04,.14),'z':(.16,.22)}
++    overlap,ratio=_footprint_similarity(face,support)
++    assert ratio==pytest.approx(.6)
++    assert overlap==pytest.approx(.6)
++    assert overlap<.8

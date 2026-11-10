@@ -1,0 +1,319 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>synthetic.cas.h5 · ALD 仿真诊断</title><style>
+:root{color-scheme:light;--ink:#203946;--muted:#536b77;--teal:#087e8b;--low:#5574a5;--high:#6e6688;
+--blue:#0072b2;--orange:#d55e00;--line:#d6e0e6;--bg:#f1f5f7}
+*{box-sizing:border-box}body{background:var(--bg);font:15px/1.65 system-ui,"Microsoft YaHei UI","PingFang SC",sans-serif;color:var(--ink);margin:0;padding:24px}
+main{max-width:1080px;margin:0 auto}header,section{background:#fff;border-radius:12px;padding:clamp(18px,3.3vw,30px);margin-bottom:18px}
+header{background:#133644;color:#fff}header h1{font-size:clamp(23px,3.6vw,36px);line-height:1.23;margin:4px 0 10px}
+header p{margin:8px 0}header .eyebrow{color:#ccdde3;font-size:13px}
+section h2{font-size:20px;margin:0 0 14px}h3{font-size:16px;margin:19px 0 8px}
+.pills{display:flex;flex-wrap:wrap;gap:8px}.pill{font-size:12px;padding:3px 10px;background:#eaf4f8;border-radius:25px;color:#23526a}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px}
+.card{background:white;border-radius:11px;padding:16px;border:1px solid #e1e8eb}.card small,.card strong{display:block}
+.card strong{font-size:21px;font-variant-numeric:tabular-nums}.card small{color:var(--muted)}
+.small{font-size:12px;color:var(--muted)}.muted{color:var(--muted)}.notavailable{color:#8b5860}
+.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;margin:10px 0 20px}
+tr+tr{border-top:1px solid var(--line)}th,td{padding:9px 10px;white-space:nowrap;text-align:left}thead{background:#f0f5f7}
+.bar{display:flex;height:26px;overflow:hidden;background:#e8edf0;border-radius:6px;margin:8px 0 13px}
+.bar span{display:block;font-size:11px;text-align:center;color:#fff;line-height:26px;overflow:hidden;white-space:nowrap}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;margin:6px 0 16px}
+.legend b{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
+.chart{width:100%;height:auto;max-height:390px;background:#fafcfd;border:1px solid var(--line);border-radius:9px}
+svg text{font:11px system-ui,sans-serif;fill:#47616c}.gridline{stroke:#dce6ea;stroke-width:1}
+.note{border-left:3px solid #087e8b;background:#f4f9fa;padding:11px 14px;margin:12px 0}
+.warn{border-left:3px solid #b25222;background:#fbf6f1;padding:11px 14px;margin:12px 0}
+details{border-top:1px solid var(--line);padding:12px 0}summary{cursor:pointer;font-weight:600}
+pre{white-space:pre-wrap;word-break:break-all;font-size:11px;background:#fafcfd;padding:12px}
+code{font-size:12px} .foot{font-size:12px;color:var(--muted)}
+@media print{body{background:#fff;padding:0}main{max-width:none}header,section,.card{break-inside:avoid;box-shadow:none;border:1px solid #cbd8de;border-radius:0}header{print-color-adjust:exact;-webkit-print-color-adjust:exact}.chart,.bar{break-inside:avoid;print-color-adjust:exact;-webkit-print-color-adjust:exact}details{break-inside:auto}}
+</style></head><body><main><header><div class="eyebrow">AutoFluent / ALD 流动分析 / 独立离线报告</div><h1>仿真结果与结构优化</h1><p>合成数据测试专用 · 不代表真实 Fluent 保存解</p><p>方案：<strong>synthetic.cas.h5</strong></p><p class="eyebrow">数据来源：原生 SV_FLUX；自动候选几何识别；没有单独的迭代记录时不得认定求解收敛。</p></header><div class="cards"><div class="card"><small>晶圆总数</small><strong>32</strong></div><div class="card"><small>有效片间通道</small><strong>24</strong></div><div class="card"><small>入口质量流量</small><strong>4.55e-05 kg/s</strong></div><div class="card"><small>进出口净差</small><strong>0%</strong></div><div class="card"><small>端口总压降</small><strong>0 Pa</strong></div><div class="card"><small>挡板孔数</small><strong>未取得</strong></div></div><section><h2>1. 入口气体去了哪里</h2><div class="legend"><span><b style="background:#087e8b"></b>晶圆片间</span><span><b style="background:#536b77"></b>中央旁路</span><span><b style="background:#5574a5"></b>低 Z 外围</span><span><b style="background:#6e6688"></b>高 Z 外围</span></div><h3>lower · 12 条通道</h3><div class="bar"><span style="width:30.78676%;background:var(--teal)" title="晶圆片间 30.79%">30.79%</span><span style="width:9.18202%;background:var(--muted)" title="中央旁路 9.182%"></span><span style="width:4.65219%;background:var(--low)" title="低 Z 外围 4.652%"></span><span style="width:4.79988%;background:var(--high)" title="高 Z 外围 4.8%"></span></div><h3>upper · 12 条通道</h3><div class="bar"><span style="width:31.50832%;background:var(--teal)" title="晶圆片间 31.51%">31.51%</span><span style="width:9.39722%;background:var(--muted)" title="中央旁路 9.397%"></span><span style="width:4.76296%;background:var(--low)" title="低 Z 外围 4.763%"></span><span style="width:4.91065%;background:var(--high)" title="高 Z 外围 4.911%"></span></div><div class="scroll"><table><thead><tr><th>截面</th><th>片间 kg/s</th><th>中央 kg/s</th><th>低侧 kg/s</th><th>高侧 kg/s</th><th>完整截面 kg/s</th><th>片间占入口</th><th>通道 CV</th></tr></thead><tbody><tr><td>lower</td><td>1.401e-05</td><td>4.178e-06</td><td>2.117e-06</td><td>2.184e-06</td><td>2.249e-05</td><td>30.79%</td><td>11.08%</td></tr><tr><td>upper</td><td>1.434e-05</td><td>4.276e-06</td><td>2.167e-06</td><td>2.234e-06</td><td>2.301e-05</td><td>31.51%</td><td>10.83%</td></tr></tbody></table></div><p class="small">各层截面位于串联流路，绝不跨层相加。端部旁路已经包含在外围主分区内，不重复计入。</p></section><section><h2>2. 晶圆片间哪里流量偏低</h2><h3>lower</h3><svg class="chart" viewBox="0 0 860 300" role="img" aria-label="lower 片间流量空间分布"><line x1="75" x2="825" y1="248.00" y2="248.00" class="gridline"/><text x="9" y="252.00">9.71e-07</text><line x1="75" x2="825" y1="194.75" y2="194.75" class="gridline"/><text x="9" y="198.75">1.07e-06</text><line x1="75" x2="825" y1="141.50" y2="141.50" class="gridline"/><text x="9" y="145.50">1.17e-06</text><line x1="75" x2="825" y1="88.25" y2="88.25" class="gridline"/><text x="9" y="92.25">1.27e-06</text><line x1="75" x2="825" y1="35.00" y2="35.00" class="gridline"/><text x="9" y="39.00">1.36e-06</text><text x="75.0" y="268" text-anchor="middle">0.047</text><text x="262.5" y="268" text-anchor="middle">0.194</text><text x="450.0" y="268" text-anchor="middle">0.341</text><text x="637.5" y="268" text-anchor="middle">0.487</text><text x="825.0" y="268" text-anchor="middle">0.634</text><polyline points="75.0,248.0 183.6,215.8 292.2,183.6 586.1,119.2 694.7,87.0 803.3,54.8" fill="none" stroke="#0072b2" stroke-width="1.8"/><circle cx="75.0" cy="248.0" r="4" fill="#0072b2"><title>第 1 排 R1-G1 X=0.047 m, 9.713e-07 kg/s</title></circle><circle cx="803.3" cy="54.8" r="4" fill="#0072b2"><title>第 1 排 R1-G7 X=0.617 m, 1.327e-06 kg/s</title></circle><text x="690" y="15" fill="#0072b2">第 1 排</text><polyline points="96.7,228.2 205.3,196.0 313.9,163.8 607.8,99.4 716.4,67.2 825.0,35.0" fill="none" stroke="#d55e00" stroke-width="1.8"/><circle cx="96.7" cy="228.2" r="4" fill="#d55e00"><title>第 2 排 R2-G1 X=0.064 m, 1.008e-06 kg/s</title></circle><circle cx="825.0" cy="35.0" r="4" fill="#d55e00"><title>第 2 排 R2-G7 X=0.634 m, 1.363e-06 kg/s</title></circle><text x="690" y="29" fill="#d55e00">第 2 排</text><text x="795" y="286">X (m)</text><text x="75" y="18">质量流量 kg/s（真实 X 坐标）</text></svg><h3>upper</h3><svg class="chart" viewBox="0 0 860 300" role="img" aria-label="upper 片间流量空间分布"><line x1="75" x2="825" y1="248.00" y2="248.00" class="gridline"/><text x="9" y="252.00">9.99e-07</text><line x1="75" x2="825" y1="194.75" y2="194.75" class="gridline"/><text x="9" y="198.75">1.1e-06</text><line x1="75" x2="825" y1="141.50" y2="141.50" class="gridline"/><text x="9" y="145.50">1.19e-06</text><line x1="75" x2="825" y1="88.25" y2="88.25" class="gridline"/><text x="9" y="92.25">1.29e-06</text><line x1="75" x2="825" y1="35.00" y2="35.00" class="gridline"/><text x="9" y="39.00">1.39e-06</text><text x="75.0" y="268" text-anchor="middle">0.047</text><text x="262.5" y="268" text-anchor="middle">0.194</text><text x="450.0" y="268" text-anchor="middle">0.341</text><text x="637.5" y="268" text-anchor="middle">0.487</text><text x="825.0" y="268" text-anchor="middle">0.634</text><polyline points="75.0,248.0 183.6,215.8 292.2,183.6 586.1,119.2 694.7,87.0 803.3,54.8" fill="none" stroke="#0072b2" stroke-width="1.8"/><circle cx="75.0" cy="248.0" r="4" fill="#0072b2"><title>第 1 排 R1-G1 X=0.047 m, 9.986e-07 kg/s</title></circle><circle cx="803.3" cy="54.8" r="4" fill="#0072b2"><title>第 1 排 R1-G7 X=0.617 m, 1.354e-06 kg/s</title></circle><text x="690" y="15" fill="#0072b2">第 1 排</text><polyline points="96.7,228.2 205.3,196.0 313.9,163.8 607.8,99.4 716.4,67.2 825.0,35.0" fill="none" stroke="#d55e00" stroke-width="1.8"/><circle cx="96.7" cy="228.2" r="4" fill="#d55e00"><title>第 2 排 R2-G1 X=0.064 m, 1.035e-06 kg/s</title></circle><circle cx="825.0" cy="35.0" r="4" fill="#d55e00"><title>第 2 排 R2-G7 X=0.634 m, 1.391e-06 kg/s</title></circle><text x="690" y="29" fill="#d55e00">第 2 排</text><text x="795" y="286">X (m)</text><text x="75" y="18">质量流量 kg/s（真实 X 坐标）</text></svg><div class="scroll"><table><thead><tr><th>层</th><th>排</th><th>极值</th><th>通道</th><th>X (m)</th><th>净流量 (kg/s)</th></tr></thead><tbody><tr><td>lower</td><td>1</td><td>最低</td><td>R1-G1</td><td>0.047</td><td>9.713e-07</td></tr><tr><td>lower</td><td>1</td><td>最高</td><td>R1-G7</td><td>0.617</td><td>1.327e-06</td></tr><tr><td>lower</td><td>2</td><td>最低</td><td>R2-G1</td><td>0.064</td><td>1.008e-06</td></tr><tr><td>lower</td><td>2</td><td>最高</td><td>R2-G7</td><td>0.634</td><td>1.363e-06</td></tr><tr><td>upper</td><td>1</td><td>最低</td><td>R1-G1</td><td>0.047</td><td>9.986e-07</td></tr><tr><td>upper</td><td>1</td><td>最高</td><td>R1-G7</td><td>0.617</td><td>1.354e-06</td></tr><tr><td>upper</td><td>2</td><td>最低</td><td>R2-G1</td><td>0.064</td><td>1.035e-06</td></tr><tr><td>upper</td><td>2</td><td>最高</td><td>R2-G7</td><td>0.634</td><td>1.391e-06</td></tr></tbody></table></div></section><section><h2>3. 挡板开孔与出口</h2><p class="notavailable">未取得可确认的挡板孔：Too few Y-planar wall faces</p></section><section><h2>4. 压力与压降</h2><div class="cards"><div class="card"><small>入口总压代理</small><strong>100 Pa</strong></div><div class="card"><small>出口总压代理</small><strong>100 Pa</strong></div><div class="card"><small>低速近似总压降</small><strong>0 Pa</strong></div></div><div class="warn">Temperature or gas properties not independently available; Mach condition unverified</div><p class="small">集气腔压力分布：未取得。</p></section><section><h2>5. 数据可信度</h2><div class="scroll"><table><thead><tr><th>检查维度</th><th>当前结论</th><th>验证边界</th></tr></thead><tbody><tr><td>原生面数据</td><td>分段范围覆盖通过</td><td>不能由文件名证明同一次 Fluent 保存</td></tr><tr><td>几何识别</td><td>候选，需独立验证</td><td>自动识别</td></tr><tr><td>分区闭合</td><td>checked on each layer</td><td>净流量/正反流量均须互斥闭合</td></tr><tr><td>整体质量守恒</td><td>0%</td><td>不能据此宣布收敛</td></tr><tr><td>迭代与残差</td><td>未取得</td><td>Case/Data 快照不足以证实收敛</td></tr><tr><td>压力稳定性</td><td>未取得</td><td>需 Fluent 监控历史或多个时间点结果</td></tr></tbody></table></div></section><section><h2>6. 与基线方案对照</h2><div class="note">本次只有一份保存解的统计。未读取与本模型同口径的基线结果，不计算优化百分比；比较之前须核对工况、截面、排布、面 ID 来源和收敛证据。</div></section><section><h2>7. 下一轮仿真怎么安排</h2><p class="small">下列仅是数据触发的检查优先级，不代表因果关系已被证明。</p><div class="scroll"><table><thead><tr><th>层</th><th>优先检查通道</th><th>X (m)</th><th>当前净流量</th><th>建议检查</th><th>固定条件</th></tr></thead><tbody><tr><td>lower</td><td>R1-G1</td><td>0.047</td><td>9.713e-07</td><td>复核该 X 位置的入口匀气、局部遮挡和外围绕流</td><td>保持入口流量、压力、网格精度及统计截面不变</td></tr><tr><td>upper</td><td>R1-G1</td><td>0.047</td><td>9.986e-07</td><td>复核该 X 位置的入口匀气、局部遮挡和外围绕流</td><td>保持入口流量、压力、网格精度及统计截面不变</td></tr></tbody></table></div></section><section><h2>8. 来源与完整明细</h2><details><summary>逐通道正反向流量与空间坐标（展开）</summary><div class="scroll"><table><thead><tr><th>层</th><th>排</th><th>通道</th><th>X (m)</th><th>Z (m)</th><th>正向 kg/s</th><th>反向幅值 kg/s</th><th>净 kg/s</th></tr></thead><tbody><tr><td>lower</td><td>1</td><td>R1-G1</td><td>0.047</td><td>-0.24</td><td>9.7128e-07</td><td>-0</td><td>9.7128e-07</td></tr><tr><td>lower</td><td>1</td><td>R1-G2</td><td>0.132</td><td>-0.24</td><td>1.03056e-06</td><td>-0</td><td>1.03056e-06</td></tr><tr><td>lower</td><td>1</td><td>R1-G3</td><td>0.217</td><td>-0.24</td><td>1.08984e-06</td><td>-0</td><td>1.08984e-06</td></tr><tr><td>lower</td><td>1</td><td>R1-G5</td><td>0.447</td><td>-0.24</td><td>1.2084e-06</td><td>-0</td><td>1.2084e-06</td></tr><tr><td>lower</td><td>1</td><td>R1-G6</td><td>0.532</td><td>-0.24</td><td>1.26768e-06</td><td>-0</td><td>1.26768e-06</td></tr><tr><td>lower</td><td>1</td><td>R1-G7</td><td>0.617</td><td>-0.24</td><td>1.32696e-06</td><td>-0</td><td>1.32696e-06</td></tr><tr><td>lower</td><td>2</td><td>R2-G1</td><td>0.064</td><td>0.04</td><td>1.00776e-06</td><td>-0</td><td>1.00776e-06</td></tr><tr><td>lower</td><td>2</td><td>R2-G2</td><td>0.149</td><td>0.04</td><td>1.06704e-06</td><td>-0</td><td>1.06704e-06</td></tr><tr><td>lower</td><td>2</td><td>R2-G3</td><td>0.234</td><td>0.04</td><td>1.12632e-06</td><td>-0</td><td>1.12632e-06</td></tr><tr><td>lower</td><td>2</td><td>R2-G5</td><td>0.464</td><td>0.04</td><td>1.24488e-06</td><td>-0</td><td>1.24488e-06</td></tr><tr><td>lower</td><td>2</td><td>R2-G6</td><td>0.549</td><td>0.04</td><td>1.30416e-06</td><td>-0</td><td>1.30416e-06</td></tr><tr><td>lower</td><td>2</td><td>R2-G7</td><td>0.634</td><td>0.04</td><td>1.36344e-06</td><td>-0</td><td>1.36344e-06</td></tr><tr><td>upper</td><td>1</td><td>R1-G1</td><td>0.047</td><td>-0.24</td><td>9.9864e-07</td><td>-0</td><td>9.9864e-07</td></tr><tr><td>upper</td><td>1</td><td>R1-G2</td><td>0.132</td><td>-0.24</td><td>1.05792e-06</td><td>-0</td><td>1.05792e-06</td></tr><tr><td>upper</td><td>1</td><td>R1-G3</td><td>0.217</td><td>-0.24</td><td>1.1172e-06</td><td>-0</td><td>1.1172e-06</td></tr><tr><td>upper</td><td>1</td><td>R1-G5</td><td>0.447</td><td>-0.24</td><td>1.23576e-06</td><td>-0</td><td>1.23576e-06</td></tr><tr><td>upper</td><td>1</td><td>R1-G6</td><td>0.532</td><td>-0.24</td><td>1.29504e-06</td><td>-0</td><td>1.29504e-06</td></tr><tr><td>upper</td><td>1</td><td>R1-G7</td><td>0.617</td><td>-0.24</td><td>1.35432e-06</td><td>-0</td><td>1.35432e-06</td></tr><tr><td>upper</td><td>2</td><td>R2-G1</td><td>0.064</td><td>0.04</td><td>1.03512e-06</td><td>-0</td><td>1.03512e-06</td></tr><tr><td>upper</td><td>2</td><td>R2-G2</td><td>0.149</td><td>0.04</td><td>1.0944e-06</td><td>-0</td><td>1.0944e-06</td></tr><tr><td>upper</td><td>2</td><td>R2-G3</td><td>0.234</td><td>0.04</td><td>1.15368e-06</td><td>-0</td><td>1.15368e-06</td></tr><tr><td>upper</td><td>2</td><td>R2-G5</td><td>0.464</td><td>0.04</td><td>1.27224e-06</td><td>-0</td><td>1.27224e-06</td></tr><tr><td>upper</td><td>2</td><td>R2-G6</td><td>0.549</td><td>0.04</td><td>1.33152e-06</td><td>-0</td><td>1.33152e-06</td></tr><tr><td>upper</td><td>2</td><td>R2-G7</td><td>0.634</td><td>0.04</td><td>1.3908e-06</td><td>-0</td><td>1.3908e-06</td></tr></tbody></table></div></details><details><summary>原生主分区正反向统计（展开）</summary><div class="scroll"><table><thead><tr><th>层</th><th>主分区</th><th>正向 kg/s</th><th>反向幅值 kg/s</th><th>净 kg/s</th></tr></thead><tbody><tr><td>lower</td><td>wafer</td><td>1.401e-05</td><td>-0</td><td>1.401e-05</td></tr><tr><td>lower</td><td>central</td><td>4.178e-06</td><td>-0</td><td>4.178e-06</td></tr><tr><td>lower</td><td>outer_low_z</td><td>2.117e-06</td><td>-0</td><td>2.117e-06</td></tr><tr><td>lower</td><td>outer_high_z</td><td>2.184e-06</td><td>-0</td><td>2.184e-06</td></tr><tr><td>upper</td><td>wafer</td><td>1.434e-05</td><td>-0</td><td>1.434e-05</td></tr><tr><td>upper</td><td>central</td><td>4.276e-06</td><td>-0</td><td>4.276e-06</td></tr><tr><td>upper</td><td>outer_low_z</td><td>2.167e-06</td><td>-0</td><td>2.167e-06</td></tr><tr><td>upper</td><td>outer_high_z</td><td>2.234e-06</td><td>-0</td><td>2.234e-06</td></tr></tbody></table></div></details><details><summary>中央 X/Z 子旁路正反向流量（展开）</summary><div class="scroll"><table><thead><tr><th>层</th><th>子区域</th><th>正向 kg/s</th><th>反向幅值 kg/s</th><th>净 kg/s</th></tr></thead><tbody><tr><td>lower</td><td>central_x_wide_gap</td><td>4.178e-06</td><td>-0</td><td>4.178e-06</td></tr><tr><td>lower</td><td>central_z_between_rows</td><td>0</td><td>-0</td><td>0</td></tr><tr><td>lower</td><td>outer_x_end_subset</td><td>4.301e-06</td><td>-0</td><td>4.301e-06</td></tr><tr><td>upper</td><td>central_x_wide_gap</td><td>4.276e-06</td><td>-0</td><td>4.276e-06</td></tr><tr><td>upper</td><td>central_z_between_rows</td><td>0</td><td>-0</td><td>0</td></tr><tr><td>upper</td><td>outer_x_end_subset</td><td>4.402e-06</td><td>-0</td><td>4.402e-06</td></tr></tbody></table></div></details><details><summary>来源、限制与核验记录（展开）</summary><pre>{
+  &quot;provenance&quot;: {
+    &quot;case_path&quot;: &quot;/tmp/tmp5iwdywp7/synthetic.cas.h5&quot;,
+    &quot;data_path&quot;: &quot;/tmp/tmp5iwdywp7/synthetic.dat.h5&quot;,
+    &quot;method&quot;: &quot;CFF native signed SV_FLUX, cell c0/c1 staircase, centroid region assignment&quot;,
+    &quot;wall_zone_fallback&quot;: false,
+    &quot;mesh_faces&quot;: 1224,
+    &quot;mesh_tetra_cells&quot;: 432,
+    &quot;result_group&quot;: &quot;1&quot;,
+    &quot;phase_group&quot;: &quot;phase-1&quot;,
+    &quot;native_flux_blocks&quot;: [
+      {
+        &quot;min_face_id&quot;: 1,
+        &quot;max_face_id&quot;: 1224,
+        &quot;count&quot;: 1224
+      }
+    ],
+    &quot;memory_budget_mb&quot;: 6144,
+    &quot;topology_block_counts&quot;: {
+      &quot;nodes&quot;: 1,
+      &quot;face_nodes&quot;: 1,
+      &quot;c0&quot;: 1,
+      &quot;c1&quot;: 1
+    },
+    &quot;projected_peak_memory_mb_not_measured&quot;: 0.33,
+    &quot;config_mode&quot;: &quot;automatic_candidate&quot;,
+    &quot;case_bytes&quot;: 86592,
+    &quot;data_bytes&quot;: 78920,
+    &quot;case_modified_ns&quot;: 1794308007414392791,
+    &quot;data_modified_ns&quot;: 1794308007415708582,
+    &quot;geometry_candidate_signature_not_mesh_hash&quot;: &quot;3a7a586d96d979ee658fbe0919344dd7930a05a3dfde8fd0e0881051c3c633b4&quot;,
+    &quot;case_data_identity_evidence&quot;: &quot;Data settings/Case File basename + compatible face-index coverage only; not a cryptographic shared-mesh fingerprint&quot;,
+    &quot;case_data_pair_independently_verified&quot;: false,
+    &quot;input_files_unchanged_during_analysis&quot;: true
+  },
+  &quot;checks&quot;: {
+    &quot;global_port_mass_imbalance_pct&quot;: 0.0,
+    &quot;cut_partition_closure&quot;: &quot;checked on each layer&quot;,
+    &quot;all_external_boundary_faces&quot;: &quot;audited; significant unclassified flux rejects result&quot;,
+    &quot;control_volume_algebraic_closure&quot;: &quot;checked on each layer&quot;
+  },
+  &quot;limitations&quot;: [
+    &quot;Axis-aligned wafer faces normal X, vertical gas travel Y, single/two layers&quot;,
+    &quot;Segmented indexed node, face, c0/c1 and original SV_FLUX supported; single mesh and tetrahedral cells only&quot;,
+    &quot;Geometry inferred automatically, not independently certified&quot;,
+    &quot;Saved Case/Data does not establish solver convergence&quot;,
+    &quot;Staircase cut uses face-centroid assignment at partition boundaries&quot;,
+    &quot;Same named Case/Data cannot prove matching mesh revisions or saved iteration&quot;,
+    &quot;Input file metadata unchanged before/after reading; concurrent in-place data edits between checks remain theoretically possible&quot;,
+    &quot;Cut sensitivity may be unavailable on large cases due to memory/runtime limits&quot;
+  ],
+  &quot;geometry&quot;: {
+    &quot;schema&quot;: &quot;autofluent.geometry_auto.v1&quot;,
+    &quot;status&quot;: &quot;candidate_needs_flux_validation&quot;,
+    &quot;assumptions&quot;: [
+      &quot;wafer surface normals along X&quot;,
+      &quot;gas travel along Y&quot;,
+      &quot;triangular wall surface mesh&quot;,
+      &quot;non-overlapping Y layers and Z rows&quot;
+    ],
+    &quot;layer_split_y_m&quot;: -0.27098958333333334,
+    &quot;total_layers&quot;: 2,
+    &quot;total_plates&quot;: 32,
+    &quot;total_channels&quot;: 24,
+    &quot;layers&quot;: [
+      {
+        &quot;id&quot;: 1,
+        &quot;rows&quot;: [
+          {
+            &quot;face_positions_lo_m&quot;: [
+              0.0,
+              0.085,
+              0.17,
+              0.255,
+              0.4000000000000001,
+              0.48500000000000004,
+              0.5700000000000001,
+              0.655
+            ],
+            &quot;face_positions_hi_m&quot;: [
+              0.009,
+              0.09400000000000001,
+              0.17900000000000002,
+              0.264,
+              0.40900000000000003,
+              0.49400000000000005,
+              0.5790000000000001,
+              0.664
+            ],
+            &quot;plate_count&quot;: 8,
+            &quot;plate_thickness_m&quot;: 0.009000000000000008,
+            &quot;gap_width_m&quot;: [
+              0.07600000000000001,
+              0.076,
+              0.07599999999999998,
+              0.13600000000000007,
+              0.07600000000000001,
+              0.07600000000000001,
+              0.07599999999999996
+            ],
+            &quot;regular_gap_index&quot;: [
+              0,
+              1,
+              2,
+              4,
+              5,
+              6
+            ],
+            &quot;wide_gap_index&quot;: [
+              3
+            ],
+            &quot;narrow_gap_index&quot;: [],
+            &quot;reference_gap_m&quot;: 0.07600000000000001,
+            &quot;z_min_m&quot;: -0.3,
+            &quot;z_max_m&quot;: -0.18,
+            &quot;y_min_m&quot;: -0.45,
+            &quot;y_max_m&quot;: -0.32,
+            &quot;median_face_x_m&quot;: 0.3320000000000001
+          },
+          {
+            &quot;face_positions_lo_m&quot;: [
+              0.017,
+              0.10200000000000002,
+              0.18699999999999997,
+              0.272,
+              0.41700000000000004,
+              0.502,
+              0.5870000000000001,
+              0.672
+            ],
+            &quot;face_positions_hi_m&quot;: [
+              0.026000000000000006,
+              0.111,
+              0.19600000000000004,
+              0.281,
+              0.426,
+              0.511,
+              0.5960000000000001,
+              0.681
+            ],
+            &quot;plate_count&quot;: 8,
+            &quot;plate_thickness_m&quot;: 0.009000000000000008,
+            &quot;gap_width_m&quot;: [
+              0.07600000000000001,
+              0.07599999999999997,
+              0.07599999999999998,
+              0.136,
+              0.07600000000000001,
+              0.07600000000000007,
+              0.07599999999999996
+            ],
+            &quot;regular_gap_index&quot;: [
+              0,
+              1,
+              2,
+              4,
+              5,
+              6
+            ],
+            &quot;wide_gap_index&quot;: [
+              3
+            ],
+            &quot;narrow_gap_index&quot;: [],
+            &quot;reference_gap_m&quot;: 0.07600000000000001,
+            &quot;z_min_m&quot;: -0.019999999999999962,
+            &quot;z_max_m&quot;: 0.10000000000000003,
+            &quot;y_min_m&quot;: -0.45,
+            &quot;y_max_m&quot;: -0.32,
+            &quot;median_face_x_m&quot;: 0.34900000000000003
+          }
+        ],
+        &quot;y_cut_m&quot;: -0.385,
+        &quot;y_min_m&quot;: -0.45,
+        &quot;y_max_m&quot;: -0.32,
+        &quot;channels&quot;: 12
+      },
+      {
+        &quot;id&quot;: 2,
+        &quot;rows&quot;: [
+          {
+            &quot;face_positions_lo_m&quot;: [
+              0.0,
+              0.085,
+              0.17,
+              0.255,
+              0.4000000000000001,
+              0.48500000000000004,
+              0.5700000000000001,
+              0.655
+            ],
+            &quot;face_positions_hi_m&quot;: [
+              0.009,
+              0.09400000000000001,
+              0.17900000000000002,
+              0.264,
+              0.40900000000000003,
+              0.49400000000000005,
+              0.5790000000000001,
+              0.664
+            ],
+            &quot;plate_count&quot;: 8,
+            &quot;plate_thickness_m&quot;: 0.009000000000000008,
+            &quot;gap_width_m&quot;: [
+              0.07600000000000001,
+              0.076,
+              0.07599999999999998,
+              0.13600000000000007,
+              0.07600000000000001,
+              0.07600000000000001,
+              0.07599999999999996
+            ],
+            &quot;regular_gap_index&quot;: [
+              0,
+              1,
+              2,
+              4,
+              5,
+              6
+            ],
+            &quot;wide_gap_index&quot;: [
+              3
+            ],
+            &quot;narrow_gap_index&quot;: [],
+            &quot;reference_gap_m&quot;: 0.07600000000000001,
+            &quot;z_min_m&quot;: -0.3,
+            &quot;z_max_m&quot;: -0.18,
+            &quot;y_min_m&quot;: -0.22,
+            &quot;y_max_m&quot;: -0.09,
+            &quot;median_face_x_m&quot;: 0.3320000000000001
+          },
+          {
+            &quot;face_positions_lo_m&quot;: [
+              0.017,
+              0.10200000000000002,
+              0.18699999999999997,
+              0.272,
+              0.41700000000000004,
+              0.502,
+              0.5870000000000001,
+              0.672
+            ],
+            &quot;face_positions_hi_m&quot;: [
+              0.026000000000000006,
+              0.111,
+              0.19600000000000004,
+              0.281,
+              0.426,
+              0.511,
+              0.5960000000000001,
+              0.681
+            ],
+            &quot;plate_count&quot;: 8,
+            &quot;plate_thickness_m&quot;: 0.009000000000000008,
+            &quot;gap_width_m&quot;: [
+              0.07600000000000001,
+              0.07599999999999997,
+              0.07599999999999998,
+              0.136,
+              0.07600000000000001,
+              0.07600000000000007,
+              0.07599999999999996
+            ],
+            &quot;regular_gap_index&quot;: [
+              0,
+              1,
+              2,
+              4,
+              5,
+              6
+            ],
+            &quot;wide_gap_index&quot;: [
+              3
+            ],
+            &quot;narrow_gap_index&quot;: [],
+            &quot;reference_gap_m&quot;: 0.07600000000000001,
+            &quot;z_min_m&quot;: -0.019999999999999962,
+            &quot;z_max_m&quot;: 0.10000000000000003,
+            &quot;y_min_m&quot;: -0.22,
+            &quot;y_max_m&quot;: -0.09,
+            &quot;median_face_x_m&quot;: 0.34900000000000003
+          }
+        ],
+        &quot;y_cut_m&quot;: -0.155,
+        &quot;y_min_m&quot;: -0.22,
+        &quot;y_max_m&quot;: -0.09,
+        &quot;channels&quot;: 12
+      }
+    ]
+  },
+  &quot;pressure_status&quot;: &quot;computed_pressure_proxy_mach_unverified&quot;,
+  &quot;baffle_status&quot;: &quot;not_identified&quot;
+}</pre></details></section><div class="foot">AutoFluent 本地原生统计报告 · 不引用联网资源</div></main></body></html>
