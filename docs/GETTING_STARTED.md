@@ -5,8 +5,8 @@ AutoFluent 面向已有的 ANSYS Fluent 保存解：以只读方式分析 `.cas.
 ## 下载安装
 
 1. 下载仓库中的 [**V2.10.5 Windows 发布 ZIP**](../AutoFluent_V2.10.5_Windows_x64.zip)。
-2. **完整解压**，不要只把 `AutoFluent.exe` 单独复制到其他目录。程序需要同目录下的 `worker/`、`templates/` 等文件。
-3. 在 Windows x64 中双击 `AutoFluent.exe`。若离线 Worker 提示缺少 Python 或依赖，请使用可用的 Python 环境安装 `numpy`、`h5py`（测试环境还使用 `pytest`）。
+2. **完整解压**，不要只把 `AutoFluent-目录浏览版.exe` 单独复制到其他目录。程序需要同目录下的 `worker/`、`templates/` 等文件。
+3. 在 Windows x64 中双击 `AutoFluent-目录浏览版.exe`。若离线 Worker 提示缺少 Python 或依赖，请使用可用的 Python 环境安装 `numpy`、`h5py`（测试环境还使用 `pytest`）。
 4. 在左侧「保存解分析」选择一份 `.cas.h5` 或 `.dat.h5`，查看识别到的配套文件和当前分析模式。
 5. 先看结构/几何预检结果。自动晶圆识别不唯一时，使用模型配置缩小搜索范围，再在同一入口分析。
 6. 分析结束后打开 HTML 报告。端口流量、压降、晶圆及挡板的状态独立展示；部分成功不等于文件损坏。
