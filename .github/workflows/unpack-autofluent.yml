@@ -46,7 +46,7 @@ jobs:
                   if zf.testzip() is not None:
                       raise SystemExit("zip integrity failed")
                   zf.extractall(work)
-              exe = [p for p in work.rglob("*") if p.is_file() and p.name.casefold() == "autofluent.exe"]
+              exe = [p for p in work.rglob("*.exe") if p.is_file() and p.name.casefold().startswith("autofluent")]
               if len(exe) != 1:
                   print("archive entries (first 90):", [e.filename for e in entries[:90]], flush=True)
                   print("all exe files:", [str(p.relative_to(work)) for p in work.rglob("*") if p.is_file() and p.suffix.lower() == ".exe"], flush=True)
@@ -69,6 +69,10 @@ jobs:
                   target.parent.mkdir(parents=True, exist_ok=True)
                   shutil.copy2(item, target)
           
+              app_exe = repo / "app" / "AutoFluent.exe"
+              app_exe.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(exe[0], app_exe)
+              print(f"Original executable: {exe[0].name}; convenience copy: app/AutoFluent.exe")
               print(f"Extracted {len(list(package.rglob('*')))} original members to repository root.")
               print("Preserved original README in docs/releases/; GitHub landing README untouched.")
 
@@ -79,7 +83,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add AutoFluent.exe START_HERE.txt SHA256SUMS.txt go.mod assets cmd worker tests templates docs examples reports tools
+          git add -A -- .
           if git diff --cached --quiet; then
             echo "Nothing new to commit."
           else
