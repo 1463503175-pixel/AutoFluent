@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 94" width="1000" height="94" role="img" aria-label="Select, identify, measure, verify, report">
+<defs><linearGradient id="base" x1="0" x2="1"><stop stop-color="#f2f8fa"/><stop offset="1" stop-color="#eaf3f7"/></linearGradient></defs>
+<rect x="1" y="1" width="998" height="92" rx="15" fill="url(#base)" stroke="#d5e5e9"/>
+<g fill="none" stroke="#9db9c4" stroke-width="1.6"><path d="M181 47h18"/><path d="m193 42 6 5-6 5"/><path d="M381 47h18"/><path d="m393 42 6 5-6 5"/><path d="M581 47h18"/><path d="m593 42 6 5-6 5"/><path d="M781 47h18"/><path d="m793 42 6 5-6 5"/></g>
+<g font-family="Arial,Helvetica,sans-serif" text-anchor="middle">
+<g fill="#174657" font-size="14" font-weight="700"><text x="100" y="43">SELECT</text><text x="300" y="43">IDENTIFY</text><text x="500" y="43">MEASURE</text><text x="700" y="43">VERIFY</text><text x="900" y="43">REPORT</text></g>
+<g fill="#5c7682" font-size="12"><text x="100" y="65">Case / Data</text><text x="300" y="65">Geometry</text><text x="500" y="65">Native flux</text><text x="700" y="65">Conservation</text><text x="900" y="65">HTML / CSV</text></g>
+</g>
+</svg>
