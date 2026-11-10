@@ -32,7 +32,7 @@ AutoFluent 面向已有的 ANSYS Fluent 保存解：以只读方式分析 `.cas.
 
 ## 配置和代码
 
-版本 V2.10.5 的示例文件在 [`source/templates/`](../source/templates/)；分析入口代码在 [`source/worker/`](../source/worker/)。CLI 参数可从 `source/worker/af_h5_offline.py --help` 开始，使用模型配置前先运行 `--check` 检查格式。**预检配置格式不等于实际几何已经识别成功。**
+版本 V2.10.5 的示例文件在 [`templates/`](../templates/)；分析入口代码在 [`worker/`](../worker/)。CLI 参数可从 `worker/af_h5_offline.py --help` 开始，使用模型配置前先运行 `--check` 检查格式。**预检配置格式不等于实际几何已经识别成功。**
 
 ## 现阶段明确限制
 
