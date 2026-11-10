@@ -1,0 +1,82 @@
+name: Extract AutoFluent release sources
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/unpack-autofluent.yml"
+      - "AutoFluent_V2.10.5_Windows_x64.zip"
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    name: Unpack uploaded release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Validate and unpack uploaded ZIP
+        shell: bash
+        run: |
+          from pathlib import Path, PurePosixPath
+          import shutil, stat, tempfile, zipfile
+          
+          repo = Path.cwd()
+          archive = repo / "AutoFluent_V2.10.5_Windows_x64.zip"
+          if not archive.is_file():
+              raise SystemExit(f"missing uploaded release: {archive.name}")
+          
+          with tempfile.TemporaryDirectory(prefix="autofluent-unpack-") as td:
+              work = Path(td)
+              with zipfile.ZipFile(archive) as zf:
+                  entries = zf.infolist()
+                  total = sum(e.file_size for e in entries)
+                  if len(entries) > 2000 or total > 150_000_000:
+                      raise SystemExit(f"unexpected archive size: {len(entries)} members / {total} bytes")
+                  for item in entries:
+                      p = PurePosixPath(item.filename.replace("\\", "/"))
+                      if p.is_absolute() or ".." in p.parts:
+                          raise SystemExit(f"unsafe archive path: {item.filename}")
+                      if stat.S_ISLNK(item.external_attr >> 16):
+                          raise SystemExit(f"symlink not permitted: {item.filename}")
+                  if zf.testzip() is not None:
+                      raise SystemExit("zip integrity failed")
+                  zf.extractall(work)
+              exe = list(work.rglob("AutoFluent.exe"))
+              if len(exe) != 1:
+                  raise SystemExit(f"expected one application EXE; found {len(exe)}")
+              package = exe[0].parent
+              required = ["worker/af_h5_offline.py", "cmd/autofluent/main_windows.go", "go.mod"]
+              for name in required:
+                  if not (package / name).is_file():
+                      raise SystemExit(f"release missing required source: {name}")
+          
+              for item in package.rglob("*"):
+                  if not item.is_file():
+                      continue
+                  relative = item.relative_to(package)
+                  if relative.as_posix() == "README.md":
+                      target = repo / "docs/releases/V2.10.5_ORIGINAL_README.md"
+                  else:
+                      target = repo / relative
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(item, target)
+          
+              print(f"Extracted {len(list(package.rglob('*')))} original members to repository root.")
+              print("Preserved original README in docs/releases/; GitHub landing README untouched.")
+
+      - name: Commit extracted release contents
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add AutoFluent.exe START_HERE.txt SHA256SUMS.txt go.mod assets cmd worker tests templates docs examples reports tools
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit."
+          else
+            git commit -m "chore: extract V2.10.5 release ZIP to browsable sources"
+            git push origin HEAD:main
+          fi
