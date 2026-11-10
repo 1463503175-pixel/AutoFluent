@@ -21,6 +21,7 @@ jobs:
       - name: Validate and unpack uploaded ZIP
         shell: bash
         run: |
+          python3 - <<'PY'
           from pathlib import Path, PurePosixPath
           import shutil, stat, tempfile, zipfile
           
@@ -67,6 +68,8 @@ jobs:
           
               print(f"Extracted {len(list(package.rglob('*')))} original members to repository root.")
               print("Preserved original README in docs/releases/; GitHub landing README untouched.")
+
+          PY
 
       - name: Commit extracted release contents
         shell: bash
