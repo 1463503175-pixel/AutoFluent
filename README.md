@@ -13,7 +13,7 @@
   &nbsp; · &nbsp;
   <a href="docs/GETTING_STARTED.md"><strong>快速开始</strong></a>
   &nbsp; · &nbsp;
-  <a href="source/"><strong>Source code</strong></a>
+  <a href="worker/"><strong>Source code</strong></a>
 </p>
 
 <sub>V2.10.5 · Windows x64 · ANSYS Fluent H5 · Go + Python · Stage release</sub>
@@ -79,11 +79,11 @@ SELECT             IDENTIFY             MEASURE            VERIFY             RE
 | 资源 | 链接 |
 |---|---|
 | **Windows 完整发布包** | [AutoFluent V2.10.5 ZIP](AutoFluent_V2.10.5_Windows_x64.zip) |
-| **解压后的 Windows EXE** | [AutoFluent.exe](app/AutoFluent.exe) |
-| **Go + Python 源码** | [Browse source](source/) |
+| **解压后的 Windows EXE** | [AutoFluent.exe](AutoFluent.exe) |
+| **Go + Python 源码** | [Go UI](cmd/autofluent/) · [Python Worker](worker/) |
 | **快速入门** | [Getting started](docs/GETTING_STARTED.md) |
-| **原版测试与变更记录** | [Source docs / QA](source/docs/) |
-| **完整性清单** | [SHA256SUMS](source/SHA256SUMS.txt) |
+| **原版测试与变更记录** | [QA & changes](docs/) · [Test logs](reports/) |
+| **完整性清单** | [SHA256SUMS](SHA256SUMS.txt) |
 
 <details>
 <summary><strong>Architecture · 技术架构</strong></summary>
