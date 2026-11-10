@@ -46,8 +46,11 @@ jobs:
                   if zf.testzip() is not None:
                       raise SystemExit("zip integrity failed")
                   zf.extractall(work)
-              exe = list(work.rglob("AutoFluent.exe"))
+              exe = [p for p in work.rglob("*") if p.is_file() and p.name.casefold() == "autofluent.exe"]
               if len(exe) != 1:
+                  print("archive entries (first 90):", [e.filename for e in entries[:90]], flush=True)
+                  print("all exe files:", [str(p.relative_to(work)) for p in work.rglob("*") if p.is_file() and p.suffix.lower() == ".exe"], flush=True)
+                  print("nested archives:", [str(p.relative_to(work)) for p in work.rglob("*.zip")], flush=True)
                   raise SystemExit(f"expected one application EXE; found {len(exe)}")
               package = exe[0].parent
               required = ["worker/af_h5_offline.py", "cmd/autofluent/main_windows.go", "go.mod"]
