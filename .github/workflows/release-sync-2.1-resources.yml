@@ -1,0 +1,33 @@
+name: Verify complete AutoFluent 2.1 resource recovery
+on:
+  push:
+    paths:
+      - '.github/workflows/release-sync-2.1-resources.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: autofluent-release-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify latest release
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --max-time 180 'https://github.com/1463503175-pixel/AutoFluent/releases/download/2.1/AutoFluent.exe' --output "$RUNNER_TEMP/AutoFluent.exe"
+          echo "30d822c0c5f5eda2cbebdf162581b920b219e9ee5438b08e1b232b5a47f30d7c  $RUNNER_TEMP/AutoFluent.exe" | sha256sum -c -
+      - name: Recover source and refresh repository atomically
+        shell: bash
+        run: |
+          cp .github/release_sync_21.py "$RUNNER_TEMP/release_sync_21.py"
+          python3 "$RUNNER_TEMP/release_sync_21.py" "$RUNNER_TEMP/AutoFluent.exe" --repo . --baseline cd4eb93fd68437783acf12a2547763e0518675b9
+          sha256sum -c SHA256SUMS.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "release: complete AutoFluent 2.1 runtime resources and release notes"
+          git push origin HEAD:main
