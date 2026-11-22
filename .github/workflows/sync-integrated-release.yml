@@ -1,0 +1,46 @@
+name: Inspect and sync integrated AutoFluent release 2.0
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/sync-integrated-release.yml'
+      - 'tools/extract_integrated_release.py'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autofluent-integrated-release
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned release asset and validate SHA256
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --max-time 180 \
+            'https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe' \
+            --output "$RUNNER_TEMP/AutoFluent.exe"
+          echo "d3b374cf79413c248d7d1ff0178cda4ef8b2d0fd8e273cd08b6e41b3f589aed1  $RUNNER_TEMP/AutoFluent.exe" | sha256sum -c -
+      - name: Inspect embedded files without executing the EXE
+        shell: bash
+        run: |
+          python3 tools/extract_integrated_release.py "$RUNNER_TEMP/AutoFluent.exe" \
+            --tag 2.0 --sha256 d3b374cf79413c248d7d1ff0178cda4ef8b2d0fd8e273cd08b6e41b3f589aed1 --repo .
+      - name: Commit verified recovery and inventory
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- .
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "chore: inspect release 2.0 and sync recoverable source"
+            git push origin HEAD:main
+          fi

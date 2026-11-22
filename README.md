@@ -10,18 +10,26 @@
 从原生面通量到晶圆片间、挡板、守恒与方案对比，让数据直接服务下一轮结构优化。
 
 <p>
-  <a href="AutoFluent_V2.10.5_Windows_x64.zip"><strong>Download for Windows</strong></a>
+  <a href="https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe"><strong>Download latest Windows EXE</strong></a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="docs/GETTING_STARTED.md">Quick start</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="cmd/autofluent/">Source code</a>
 </p>
 
-<sub>Windows x64 &nbsp; / &nbsp; ANSYS Fluent H5 &nbsp; / &nbsp; Go + Python &nbsp; / &nbsp; V2.10.5</sub>
+<sub>Windows x64 &nbsp; / &nbsp; ANSYS Fluent H5 &nbsp; / &nbsp; 最新发布 2.0 · 源码同步核验中</sub>
 
 </div>
 
 ---
+
+## 最新发布与源码同步
+
+| 最新集成程序 | 源码状态 |
+|---|---|
+| [Release 2.0](https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0) · 2026-11-22 · [AutoFluent.exe](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe) | 原 V2.10.5 源码为可追溯基线；新版 EXE 中可恢复的原始文件通过静态拆包流程核验。 |
+
+查看 [拆包工作流](https://github.com/1463503175-pixel/AutoFluent/actions/workflows/sync-integrated-release.yml)。未通过源码完整性校验前，不将旧源码标为新版。历史 V2.10.5 下载包继续保留。
 
 ## From simulation to insight
 
@@ -62,8 +70,8 @@ AutoFluent 从已有的 `.cas.h5` 与 `.dat.h5` 文件读取 Fluent 原生数据
 
 ## Get started
 
-**01. Download** — 下载 [Windows x64 完整程序包](AutoFluent_V2.10.5_Windows_x64.zip) 并全部解压。  
-**02. Open** — 运行 `AutoFluent-目录浏览版.exe`，在「保存解分析」中选择 `.cas.h5` 或 `.dat.h5`。  
+**01. Download** — 优先下载 [最新集成 EXE](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe)。历史目录浏览版可下载 [V2.10.5 压缩包](AutoFluent_V2.10.5_Windows_x64.zip) 并完整解压。  
+**02. Open** — 运行下载的 `AutoFluent.exe`（历史压缩包运行 `AutoFluent-目录浏览版.exe`），在「保存解分析」中选择 `.cas.h5` 或 `.dat.h5`。  
 **03. Analyze** — 确认文件配对及几何预检，执行离线分析，查看统计结果与 HTML 报告。
 
 [完整使用指南](docs/GETTING_STARTED.md) · [查看配置示例](templates/) · [查看分析报告示例](examples/)
@@ -79,7 +87,7 @@ AutoFluent 从已有的 `.cas.h5` 与 `.dat.h5` 文件读取 Fluent 原生数据
 
 | | |
 |---|---|
-| **Download** | [V2.10.5 Windows x64](AutoFluent_V2.10.5_Windows_x64.zip) |
+| **Download** | [最新 Release 2.0 EXE](https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0) · [V2.10.5 历史 ZIP](AutoFluent_V2.10.5_Windows_x64.zip) |
 | **Documentation** | [Quick start](docs/GETTING_STARTED.md) · [Validation &amp; changelog](docs/V2.10.5_专项修改与验证.md) |
 | **Source** | [Go desktop](cmd/autofluent/) · [Python analysis worker](worker/) |
 | **Examples** | [Configuration templates](templates/) · [Report samples](examples/) |
@@ -99,6 +107,6 @@ AutoFluent / Windows native UI (Go)
             └── Existing Workbench / Fluent session
 ```
 
-当前仓库公开的是 V2.10.5 版本；真实 FFF 大模型的完整晶圆、挡板与内存测试仍以 [专项验收记录](docs/V2.10.5_专项修改与验证.md) 为准。
+历史可浏览基线为 V2.10.5；最新 EXE 对应源码以拆包核验结果为准。历史版本中，真实 FFF 大模型的完整晶圆、挡板与内存测试仍以 [专项验收记录](docs/V2.10.5_专项修改与验证.md) 为准。
 
 </details>
