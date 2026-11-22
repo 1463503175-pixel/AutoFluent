@@ -1,0 +1,30 @@
+{
+  "tag": "2.0",
+  "asset": "AutoFluent.exe",
+  "size": 32208896,
+  "sha256": "d3b374cf79413c248d7d1ff0178cda4ef8b2d0fd8e273cd08b6e41b3f589aed1",
+  "status": "conflicting_payload",
+  "archives": [
+    "zip@3522368",
+    "zip@3522368/zip@0"
+  ],
+  "conflicts": [
+    "tests/__init__.py",
+    "tests/test_deprecations.py",
+    "tests/test_dtype.py",
+    "tests/test_function_base.py",
+    "tests/test_multiarray.py",
+    "tests/test_numeric.py",
+    "tests/test_polynomial.py",
+    "tests/test_regression.py",
+    "tests/test_shape_base.py",
+    "tests/test_utils.py"
+  ],
+  "missing_core_files": [
+    "cmd/autofluent/main_windows.go",
+    "go.mod"
+  ],
+  "recovered": [],
+  "compiled_archive_inventory": [],
+  "source_note": "Original readable files only; compiled code is not original source."
+}
