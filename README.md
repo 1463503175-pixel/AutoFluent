@@ -14,10 +14,10 @@
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="docs/GETTING_STARTED.md">Quick start</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="cmd/autofluent/">Source code</a>
+  <a href="worker/">Analysis source</a>
 </p>
 
-<sub>Windows x64 &nbsp; / &nbsp; ANSYS Fluent H5 &nbsp; / &nbsp; 最新发布 2.0 · 源码同步核验中</sub>
+<sub>Windows x64 &nbsp; / &nbsp; ANSYS Fluent H5 &nbsp; / &nbsp; 最新发布 2.0 · Worker 源码已同步</sub>
 
 </div>
 
@@ -27,9 +27,9 @@
 
 | 最新集成程序 | 源码状态 |
 |---|---|
-| [Release 2.0](https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0) · 2026-11-22 · [AutoFluent.exe](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe) | 原 V2.10.5 源码为可追溯基线；新版 EXE 中可恢复的原始文件通过静态拆包流程核验。 |
+| [Release 2.0](https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0) · 2026-11-22 · [AutoFluent.exe](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe) | 已同步原始 EXE 及 56 个内嵌项目文件（50 个 Python 文件、3 个模板、3 个资源）。 |
 
-查看 [拆包结果与源码归属](release_payload/2.0/README.md) · [拆包工作流](https://github.com/1463503175-pixel/AutoFluent/actions/workflows/sync-integrated-release.yml)。新版 EXE 与 Worker 可以独立校验；Go 桌面完整源代码若未内嵌，仍为旧版基线，不能声称与新版 EXE 可重现构建。历史 V2.10.5 下载包继续保留。
+查看 [拆包结果与源码归属](release_payload/2.0/README.md) · [拆包工作流](https://github.com/1463503175-pixel/AutoFluent/actions/workflows/sync-integrated-release.yml)。[SHA-256 校验清单](SHA256SUMS.txt) 覆盖新版 EXE 与恢复文件。Go 桌面源码、构建定义及原有测试未包含于新版 EXE，保留 V2.10.5 历史基线；不可据此声称能完整重建 Release 2.0。历史 ZIP 继续保留。静态核验不等于真实 Fluent / Windows 实机验收。
 
 ## From simulation to insight
 
@@ -68,6 +68,14 @@ AutoFluent 从已有的 `.cas.h5` 与 `.dat.h5` 文件读取 Fluent 原生数据
 </tr>
 </table>
 
+## Latest engine additions
+
+- [流场诊断](worker/af_flow_diagnostics.py) 与 [上下挡板分析](worker/af_dual_baffles.py)。
+- [物种浓度与暴露分析](worker/af_species_exposure.py)、[表面反应位点分析](worker/af_wall_reaction.py)；保存快照不能代替完整剂量或饱和反应证据。
+- [V11 报告适配器](worker/af_report_v11.py) 与 [模板](templates/report_v11/report_template.html)。
+
+以上目录来自 Release 2.0 内嵌项目文件，不是根据旧版代码推测重写。
+
 ## Get started
 
 **01. Download** — 优先下载 [最新集成 EXE](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe)。历史目录浏览版可下载 [V2.10.5 压缩包](AutoFluent_V2.10.5_Windows_x64.zip) 并完整解压。  
@@ -89,7 +97,7 @@ AutoFluent 从已有的 `.cas.h5` 与 `.dat.h5` 文件读取 Fluent 原生数据
 |---|---|
 | **Download** | [最新 Release 2.0 EXE](https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0) · [V2.10.5 历史 ZIP](AutoFluent_V2.10.5_Windows_x64.zip) |
 | **Documentation** | [Quick start](docs/GETTING_STARTED.md) · [Validation &amp; changelog](docs/V2.10.5_专项修改与验证.md) |
-| **Source** | [Go desktop](cmd/autofluent/) · [Python analysis worker](worker/) |
+| **Source** | [Python analysis worker — 2.0](worker/) · [Go desktop — historical baseline](cmd/autofluent/) |
 | **Examples** | [Configuration templates](templates/) · [Report samples](examples/) |
 | **Related project** | [AutoMesh — mesh quality workstation](https://github.com/1463503175-pixel/AutoMesh) |
 
@@ -107,6 +115,6 @@ AutoFluent / Windows native UI (Go)
             └── Existing Workbench / Fluent session
 ```
 
-历史可浏览基线为 V2.10.5；最新 EXE 对应源码以拆包核验结果为准。历史版本中，真实 FFF 大模型的完整晶圆、挡板与内存测试仍以 [专项验收记录](docs/V2.10.5_专项修改与验证.md) 为准。
+Worker 与配置模板已同步 Release 2.0；Go 桌面与原测试仍为 V2.10.5 历史基线。历史版本中，真实 FFF 大模型的完整晶圆、挡板与内存测试仍以 [专项验收记录](docs/V2.10.5_专项修改与验证.md) 为准。
 
 </details>

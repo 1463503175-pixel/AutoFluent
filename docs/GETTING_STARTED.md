@@ -4,9 +4,9 @@ AutoFluent 面向已有的 ANSYS Fluent 保存解：以只读方式分析 `.cas.
 
 ## 下载安装
 
-1. 下载仓库中的 [**V2.10.5 Windows 发布 ZIP**](../AutoFluent_V2.10.5_Windows_x64.zip)。
-2. **完整解压**，不要只把 `AutoFluent-目录浏览版.exe` 单独复制到其他目录。程序需要同目录下的 `worker/`、`templates/` 等文件。
-3. 在 Windows x64 中双击 `AutoFluent-目录浏览版.exe`。若离线 Worker 提示缺少 Python 或依赖，请使用可用的 Python 环境安装 `numpy`、`h5py`（测试环境还使用 `pytest`）。
+1. 下载 [**Release 2.0 一体化 Windows EXE**](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe)。
+2. 将 EXE 放在本地可写目录，双击运行；新版使用内嵌 Worker 与资源，不需要先解压历史 ZIP。
+3. 如需查阅历史版本，可另行下载 [V2.10.5 ZIP](../AutoFluent_V2.10.5_Windows_x64.zip)，完整解压后运行其中的程序；不要混用不同版本的目录。
 4. 在左侧「保存解分析」选择一份 `.cas.h5` 或 `.dat.h5`，查看识别到的配套文件和当前分析模式。
 5. 先看结构/几何预检结果。自动晶圆识别不唯一时，使用模型配置缩小搜索范围，再在同一入口分析。
 6. 分析结束后打开 HTML 报告。端口流量、压降、晶圆及挡板的状态独立展示；部分成功不等于文件损坏。
@@ -32,7 +32,11 @@ AutoFluent 面向已有的 ANSYS Fluent 保存解：以只读方式分析 `.cas.
 
 ## 配置和代码
 
-版本 V2.10.5 的示例文件在 [`templates/`](../templates/)；分析入口代码在 [`worker/`](../worker/)。CLI 参数可从 `worker/af_h5_offline.py --help` 开始，使用模型配置前先运行 `--check` 检查格式。**预检配置格式不等于实际几何已经识别成功。**
+Release 2.0 恢复的配置与报告模板在 [`templates/`](../templates/)；分析入口代码在 [`worker/`](../worker/)。CLI 参数可从 `worker/af_h5_offline.py --help` 开始，使用模型配置前先运行 `--check` 检查格式。**预检配置格式不等于实际几何已经识别成功。**
+
+## 源码来源与验收边界
+
+新版 EXE、Worker、模板与资源已同步，SHA-256 见[校验清单](../SHA256SUMS.txt)。静态拆包未取得完整新版 Go 源码、编译定义及测试工程；原有 Go 源码和测试保留为 V2.10.5 历史基线，不构成 Release 2.0 的完整可重建源码。详见[恢复清单](../release_payload/2.0/README.md)。
 
 ## 现阶段明确限制
 
