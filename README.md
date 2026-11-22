@@ -1,121 +1,104 @@
 <div align="center">
 
-<img src="docs/media/hero.svg" alt="AutoFluent — CFD post-processing for batch ALD reactors" width="100%"/>
+<br>
 
-<br/>
+<img src="assets/AutoFluent_icon_512.png" width="96" alt="AutoFluent">
 
-<a href="https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe"><strong>下载 Windows 集成版 ↓</strong></a>
-&nbsp; · &nbsp;
-<a href="docs/GETTING_STARTED.md">快速开始</a>
-&nbsp; · &nbsp;
-<a href="worker/">分析源码</a>
-&nbsp; · &nbsp;
-<a href="https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0">版本发布</a>
+<h1>AutoFluent</h1>
 
-<sub>Release 2.0 &nbsp; / &nbsp; 2026.11.22 &nbsp; / &nbsp; Windows x64 &nbsp; / &nbsp; ANSYS Fluent HDF5</sub>
+<h3>From simulation to engineering intelligence.</h3>
+
+<p><strong>让每一次仿真，都成为下一次设计的依据。</strong></p>
+
+<p>专为批量式 ALD 反应腔打造的 CFD 分析与结构优化工作站。<br>
+从原生求解数据出发，将复杂流场转化为清晰、可验证的工程决策。</p>
+
+<a href="https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-0B776D?style=for-the-badge&logo=windows&logoColor=white"></a>
+<a href="docs/GETTING_STARTED.md"><img alt="Quick start" src="https://img.shields.io/badge/Quick%20start-24292F?style=for-the-badge"></a>
+
+<br>
+
+<a href="https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0">Release 2.0</a> &nbsp;·&nbsp; <a href="worker/">分析引擎</a> &nbsp;·&nbsp; <a href="templates/report_v11/">报告模板</a> &nbsp;·&nbsp; <a href="https://github.com/1463503175-pixel/AutoFluent/issues">问题反馈</a>
+
+<sub>Windows x64 &nbsp; / &nbsp; ANSYS Fluent HDF5 &nbsp; / &nbsp; Local-first workflow</sub>
+
+<br><br>
 
 </div>
 
----
+<img src="docs/media/brand.svg" width="100%" alt="Beyond the residuals. Understand the flow.">
 
-## 让仿真结果直接服务于结构优化
+## Beyond the residuals.
 
-**AutoFluent 是面向批量式原子层沉积（ALD）反应腔的 Fluent 后处理与仿真辅助工作站。**
+**仿真结束，不意味着分析完成。**
 
-从 Fluent 保存解中读取原生面质量通量、网格拓扑及求解场，自动组织晶圆片间、旁路、挡板、压力和物种数据。将重复的统计操作转化为可定位、可核验、可对比的工程分析。
+传统 CFD 后处理依赖大量重复的截面构造、通量提取、数据整理和人工对照。AutoFluent 将这些工作整合到同一个分析环境：直接读取 Fluent 保存解，追踪气体如何经过反应腔，定位偏流与供气差异，并为下一轮结构优化提供定量依据。
 
-无需启动 Fluent 即可完成保存解的离线分析；需要统一工况或继续求解时，再连接已有 Workbench / Fluent 会话。
+不止是看云图，而是理解气体去了哪里、哪里分得少，以及改变结构之后究竟发生了什么。
 
-## 01 / 核心能力
+## What you can do
 
 <table>
 <tr>
 <td width="50%" valign="top">
-<h3>Native H5 · 原生数据</h3>
-<p>自动配对 Case/Data，检查结果组、原生通量及面 ID，直接读取质量流量和求解场，而不是从云图估算。</p>
-<b>输入</b>：.cas.h5 / .dat.h5
+<h3>01 &nbsp; Flow intelligence</h3>
+<b>看清流量的真实去向</b>
+<p>直接读取原生质量通量，分析片间、中央及外围旁路，建立入口到出口的流量收支。</p>
 </td>
 <td width="50%" valign="top">
-<h3>Wafer mapping · 晶圆通道</h3>
-<p>识别晶圆层、排及片间隙，支持几何配置辅助的普通和交错排；统计逐通道净流量、CV、中央与外围旁路。</p>
-<b>输出</b>：流量去向与异常通道位置
+<h3>02 &nbsp; Spatial diagnostics</h3>
+<b>把异常定位到具体结构</b>
+<p>独立解析晶圆层、排与通道，追踪最弱位置、均匀性 CV、挡板孔位和集气腔压力。</p>
 </td>
 </tr>
 <tr>
 <td valign="top">
-<h3>Flow diagnostics · 流场诊断</h3>
-<p>分析上下挡板、逐孔流量、出口空间关系及可用压力数据，区分局部偏流与整体均匀性问题。</p>
-<b>输出</b>：挡板分布、压力与异常定位
+<h3>03 &nbsp; Reaction insights</h3>
+<b>从流动延伸到反应过程</b>
+<p>在对应求解字段可用时，分析物种浓度、暴露相关量和表面反应位点，观察反应区域的空间差异。</p>
 </td>
 <td valign="top">
-<h3>Species &amp; surface · 物种与反应</h3>
-<p>在保存解字段可用时，统计物种浓度、暴露相关数据及表面位点覆盖率。</p>
-<b>边界</b>：单个快照不代表完整曝光剂量或成膜饱和
-</td>
-</tr>
-<tr>
-<td valign="top">
-<h3>Physical checks · 物理核验</h3>
-<p>区分分区闭合、整体及局部质量守恒、几何归属与可比性；保留独立成功的指标。</p>
-<b>原则</b>：缺失的数据不以零代替
-</td>
-<td valign="top">
-<h3>Report V11 · 分析报告</h3>
-<p>生成结构化结果与 HTML 报告，把关键指标、空间分布、数据可信度和方案对照集中组织。</p>
-<b>入口</b>：<a href="templates/report_v11/">V11 报告模板</a>
+<h3>04 &nbsp; Design iteration</h3>
+<b>让方案变化有数据依据</b>
+<p>核对工况、统计截面及分区口径，比较不同方案的流量分配、均匀性和压力损失。</p>
 </td>
 </tr>
 </table>
 
-## 02 / 从保存解到工程证据
+## One workflow. From data to insight.
 
-<img src="docs/media/workflow.svg" width="100%" alt="Import, identify, measure, verify, report — five-stage workflow"/>
+|  |  |
+|:--|:--|
+| **01 — Import** | 选择 Fluent 保存的 Case/Data，自动检查配对与原生字段。 |
+| **02 — Analyze** | 识别几何与统计区域，计算片间、旁路、挡板、压力等可取得的指标。 |
+| **03 — Verify** | 独立检查分区闭合、质量守恒、缺失字段和比较条件。 |
+| **04 — Optimize** | 生成 V11 分析报告，定位问题并建立下一轮方案的对照依据。 |
 
-<sub>流程示意；封面流线为概念插图，不是实际求解结果。</sub>
+### Two ways to work
 
-| 研究问题 | AutoFluent 提供的依据 |
-|---|---|
-| 气体有多少真正经过晶圆？ | 各层片间净流量、占入口比例及旁路分布 |
-| 哪一处流量最弱？ | 分排、逐通道坐标、极值与均匀性 CV |
-| 挡板是否存在偏流？ | 逐孔及孔排流量、边缘通路、压力与出口对应 |
-| 新结构是否改善了流场？ | 同口径指标、模型对比及守恒核验 |
-| 物种是否充分到达反应区？ | 可取得的浓度、暴露相关量和表面位点覆盖率；完整反应仍需独立验证 |
+**Offline analysis** — 日常分析无需启动 Fluent。直接使用本地保存解，不改变原文件。
 
-## 03 / 快速上手
+**Connected workflow** — 需要统一工况或继续求解时，连接已有 Workbench / Fluent 会话，经过确认后执行受控操作。
 
-**下载 → 运行 → 分析**，日常保存解分析不需要连接 Workbench。
+## Get started
 
-1. 下载 [**AutoFluent.exe**](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe)，放到本地可写目录，双击运行。
-2. 在保存解分析入口选择任意一份 Fluent H5 文件，核对 Case/Data 配对及几何预检。
-3. 执行分析，查看 HTML 报告与数据核验结果。需要模型比较时，先核对工况和统计截面。
+下载最新的一体化 Windows 程序，放在本地可写目录，双击运行。在保存解分析中选择一份 `.cas.h5` 或 `.dat.h5`，确认文件配对及几何预检后开始分析。
 
-[完整使用指南 →](docs/GETTING_STARTED.md) &nbsp; · &nbsp; [几何配置示例 →](templates/geometry_config_example_staggered.json)
+**[Download AutoFluent 2.0](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe)** &nbsp; · &nbsp; [完整使用指南](docs/GETTING_STARTED.md) &nbsp; · &nbsp; [几何配置](templates/geometry_config_example_staggered.json)
 
-### 两种工作方式
+## Explore the project
 
-| 离线分析 · Offline | 在线控制 · Connected |
-|:---|:---|
-| 使用已保存的 Case/Data，直接统计流量、压力、物种和几何分区。 | 连接已有 Workbench / Fluent，进行受控的标准工况及求解任务。 |
-| 无需启动 Fluent，不改变原始保存解。 | 工况发布或迭代须经用户确认。 |
-
-## 04 / 项目与资源
-
-| 模块 | 入口 |
-|---|---|
-| Desktop application | [最新集成程序](app/) |
-| Analysis engine | [Python 分析源码](worker/) |
-| Configuration &amp; report | [配置及报告模板](templates/) |
-| Documentation | [使用说明](docs/GETTING_STARTED.md) |
-| Release verification | [SHA-256](SHA256SUMS.txt) · [源码恢复清单](docs/release_inventory.json) |
+[Analysis engine](worker/) &nbsp; · &nbsp; [Report V11](templates/report_v11/) &nbsp; · &nbsp; [Windows application](app/) &nbsp; · &nbsp; [Documentation](docs/)
 
 <details>
-<summary><b>发布来源与技术边界 / Release provenance</b></summary>
+<summary><strong>Release integrity &amp; scientific scope</strong></summary>
 
-当前发布为 Release 2.0（2026-11-22）。仓库中的 EXE、50 个 Python 模块、3 份模板及 3 份图标资源均来自此次上传的一体化程序；展示图和使用说明单独维护。
+当前仓库以 2026-11-22 上传的 Release 2.0 为准。可恢复的 Python 分析模块、模板及图标来自发布程序，展示文档独立维护。
 
-集成程序未包含完整可恢复的 Go 桌面源码及构建定义，因此当前仓库不保证可重建完全一致的 EXE。静态拆包核验不代表 Windows、Fluent 联机或特定真实模型的功能验收。
+- [SHA-256 校验清单](SHA256SUMS.txt)
+- [原始文件恢复记录](docs/release_inventory.json)
 
-流量分布与 CV 用于评价流场，而非直接证明膜厚均匀性；不同几何的统计口径及收敛状态需分别核验。
+集成 EXE 未包含可恢复的完整桌面前端源码及构建定义。当前静态核验不代表所有 Windows / Fluent 真机功能已验收。流场指标不能直接证明成膜均匀性；保存快照不能代替完整反应剂量或收敛历史。未取得的数据与不满足比较条件的结果应独立标注。
 
 </details>
 
@@ -123,8 +106,6 @@
 
 <div align="center">
 
-<b>AutoFluent</b> &nbsp; / &nbsp; Engineering insight from native flow data.
-
-[下载最新版本](https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0) &nbsp; · &nbsp; [提交问题](https://github.com/1463503175-pixel/AutoFluent/issues)
+<sub>AutoFluent &nbsp;·&nbsp; Built for ALD research and engineering exploration.</sub>
 
 </div>

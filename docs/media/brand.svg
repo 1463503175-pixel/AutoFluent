@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="344" viewBox="0 0 1280 344" role="img" aria-labelledby="t d">
+<title id="t">Beyond the residuals. Understand the flow.</title>
+<desc id="d">AutoFluent brand typography on an abstract dark gradient. No simulation data is depicted.</desc>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1114"/><stop offset=".58" stop-color="#0c1b1e"/><stop offset="1" stop-color="#11342e"/></linearGradient>
+<radialGradient id="light" cx=".72" cy="1.15" r=".9"><stop stop-color="#3fe1b2" stop-opacity=".29"/><stop offset=".45" stop-color="#11b9b0" stop-opacity=".10"/><stop offset="1" stop-color="#0e1518" stop-opacity="0"/></radialGradient>
+<linearGradient id="ink" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#effffb"/><stop offset="1" stop-color="#8ce2cc"/></linearGradient>
+<linearGradient id="hair" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#a8d7ce" stop-opacity=".45"/><stop offset="1" stop-color="#a8d7ce" stop-opacity=".08"/></linearGradient>
+<clipPath id="round"><rect width="1280" height="344" rx="14"/></clipPath>
+</defs>
+<g clip-path="url(#round)">
+<rect width="1280" height="344" fill="url(#bg)"/>
+<rect width="1280" height="344" fill="url(#light)"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<text x="58" y="57" fill="#92bdb5" font-size="13" font-weight="600" letter-spacing="3">AUTOFLUENT / ENGINEERING INTELLIGENCE</text>
+<text x="53" y="146" font-size="67" font-weight="700" letter-spacing="-2.7" fill="#f1f5f4">Beyond the residuals.</text>
+<text x="53" y="223" font-size="67" font-weight="700" letter-spacing="-2.7" fill="url(#ink)">Understand the flow.</text>
+<path d="M58 269H1222" stroke="url(#hair)" stroke-width="1"/>
+<text x="58" y="307" fill="#b3c4c1" font-size="14" letter-spacing="1.6">NATIVE DATA. PHYSICAL EVIDENCE. BETTER DESIGN DECISIONS.</text>
+<text x="1222" y="307" text-anchor="end" fill="#b3c4c1" font-size="13" letter-spacing="1.5">AF / 02</text>
+</g></g></svg>
