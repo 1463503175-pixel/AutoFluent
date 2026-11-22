@@ -1,11 +1,5 @@
-AutoFluent — Release 2.0 (2026-11-22)
-
-1. 下载并运行最新 AutoFluent.exe（内嵌 Worker 与资源）。
-https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe
-2. 保存解分析：选择 Fluent 的 .cas.h5/.dat.h5；离线分析无需先连接 Workbench。
-3. 先核对几何预检，再执行通量与报告计算。在线工况和迭代须由用户确认。
-4. 完整指南：docs/GETTING_STARTED.md
-
-源码同步：56 个原始项目文件已经恢复，完整清单位于 release_payload/2.0/inventory.json。
-旧版 Go 源码和测试仍为 V2.10.5 历史基线，不能保证重建新版 EXE。
-历史 ZIP 保留，勿与最新 EXE 混用。静态恢复不等于 Windows/Fluent 实机验收。
+AutoFluent Release 2.0 — 2026-11-22
+运行 app/AutoFluent.exe，或从最新 Release 下载集成程序。
+离线分析无需 Workbench；在线工况与求解需明确确认。
+使用说明：docs/GETTING_STARTED.md
+核验记录：docs/release_inventory.json
