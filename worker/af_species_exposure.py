@@ -132,9 +132,6 @@ def analyze_species(cf,df,mesh,centers,geometry,layers,inlet_ids=None):
             'source_case':str(cf.filename),'source_data':str(df.filename),'regions':[],'channels':[],
             'weighting':'四面体体积加权；单元中心位于识别出的规则片间隙及各排Y/Z边界框内。边界框不是精确圆形晶圆投影。',
             'spatial_axes':'沿Y分上下游层、沿Z分排；坐标与原AF几何模块一致，不按截图推断上下。'}
-    if not geometry or not geometry.get('layers'):
-        result.update(status='partial',reason='已识别物种，但晶圆几何未取得，未推断片间区域')
-        return result
     volumes=cell_volumes(mesh,centers)
     try:
         density=read_field(cells,'SV_DENSITY',mesh['nc'],_indexed_datasets).reshape(-1)
@@ -148,6 +145,9 @@ def analyze_species(cf,df,mesh,centers,geometry,layers,inlet_ids=None):
         result['gas_inventory_kg']=inventory
     except (ValueError,KeyError,IndexError,TypeError):
         result['gas_inventory_kg']=None
+    if not geometry or not geometry.get('layers'):
+        result.update(status='partial',reason='已识别物种，但晶圆几何未取得，未推断片间区域')
+        return result
     centers=centers[1:]
     try:
         speed=np.sqrt(sum(read_field(cells,k,mesh['nc'],_indexed_datasets).reshape(-1)**2 for k in ('SV_U','SV_V','SV_W')))

@@ -13,12 +13,12 @@
 <p>专为批量式 ALD 反应腔打造的 CFD 分析与结构优化工作站。<br>
 从原生求解数据出发，将复杂流场转化为清晰、可验证的工程决策。</p>
 
-<a href="https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-0B776D?style=for-the-badge&logo=windows&logoColor=white"></a>
+<a href="https://github.com/1463503175-pixel/AutoFluent/releases/download/2.1/AutoFluent.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download%20for%20Windows-0B776D?style=for-the-badge&logo=windows&logoColor=white"></a>
 <a href="docs/GETTING_STARTED.md"><img alt="Quick start" src="https://img.shields.io/badge/Quick%20start-24292F?style=for-the-badge"></a>
 
 <br>
 
-<a href="https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0">Release 2.0</a> &nbsp;·&nbsp; <a href="worker/">分析引擎</a> &nbsp;·&nbsp; <a href="templates/report_v11/">报告模板</a> &nbsp;·&nbsp; <a href="https://github.com/1463503175-pixel/AutoFluent/issues">问题反馈</a>
+<a href="https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.1">Release 2.1</a> &nbsp;·&nbsp; <a href="worker/">分析引擎</a> &nbsp;·&nbsp; <a href="templates/report_v11/">报告模板</a> &nbsp;·&nbsp; <a href="https://github.com/1463503175-pixel/AutoFluent/issues">问题反馈</a>
 
 <sub>Windows x64 &nbsp; / &nbsp; ANSYS Fluent HDF5 &nbsp; / &nbsp; Local-first workflow</sub>
 
@@ -84,7 +84,7 @@
 
 下载最新的一体化 Windows 程序，放在本地可写目录，双击运行。在保存解分析中选择一份 `.cas.h5` 或 `.dat.h5`，确认文件配对及几何预检后开始分析。
 
-**[Download AutoFluent 2.0](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe)** &nbsp; · &nbsp; [完整使用指南](docs/GETTING_STARTED.md) &nbsp; · &nbsp; [几何配置](templates/geometry_config_example_staggered.json)
+**[Download AutoFluent 2.1](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.1/AutoFluent.exe)** &nbsp; · &nbsp; [完整使用指南](docs/GETTING_STARTED.md) &nbsp; · &nbsp; [几何配置](templates/geometry_config_example_staggered.json)
 
 ## Explore the project
 
@@ -93,7 +93,7 @@
 <details>
 <summary><strong>Release integrity &amp; scientific scope</strong></summary>
 
-当前仓库以 2026-11-22 上传的 Release 2.0 为准。可恢复的 Python 分析模块、模板及图标来自发布程序，展示文档独立维护。
+当前仓库以 2026-11-22 上传的 Release 2.1 为准。可恢复的 Python 分析模块、模板及图标来自发布程序，展示文档独立维护。本次已从集成程序原样恢复 58 个项目文件，其中 50 个 Python 分析模块。
 
 - [SHA-256 校验清单](SHA256SUMS.txt)
 - [原始文件恢复记录](docs/release_inventory.json)

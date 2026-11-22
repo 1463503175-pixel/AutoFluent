@@ -1,12 +1,83 @@
 {
-  "release": "2.0",
+  "release": "2.1",
   "published_date": "2026-11-22",
   "asset": "app/AutoFluent.exe",
-  "size": 32208896,
-  "sha256": "d3b374cf79413c248d7d1ff0178cda4ef8b2d0fd8e273cd08b6e41b3f589aed1",
+  "size": 32211968,
+  "sha256": "30d822c0c5f5eda2cbebdf162581b920b219e9ee5438b08e1b232b5a47f30d7c",
   "archives": [
     "zip@3522368",
     "zip@3522368/zip@0"
+  ],
+  "archive_scopes": [
+    {
+      "archive": "zip@3522368",
+      "project_file_count": 58,
+      "candidate_paths": [
+        "assets/AutoFluent.ico",
+        "assets/AutoFluent_icon_512.png",
+        "assets/AutoFluent_source.png",
+        "templates/ALD-N2-100Pa-DRAFT.json",
+        "templates/geometry_config_example_staggered.json",
+        "templates/report_v11/report.css",
+        "templates/report_v11/report.js",
+        "templates/report_v11/report_template.html",
+        "worker/af_adaptive_compare.py",
+        "worker/af_adaptive_geometry.py",
+        "worker/af_adaptive_native.py",
+        "worker/af_baffle_openings.py",
+        "worker/af_bundle_diagnostics_selftest.py",
+        "worker/af_bundle_selftest.py",
+        "worker/af_bundle_species_selftest.py",
+        "worker/af_cff_rt0.py",
+        "worker/af_cff_topology.py",
+        "worker/af_codex_import.py",
+        "worker/af_common_cut_compare.py",
+        "worker/af_compare.py",
+        "worker/af_core.py",
+        "worker/af_dual_baffles.py",
+        "worker/af_flow_diagnostics.py",
+        "worker/af_geometry_precheck.py",
+        "worker/af_geometry_scout.py",
+        "worker/af_h5_batch.py",
+        "worker/af_h5_offline.py",
+        "worker/af_h5_schema.py",
+        "worker/af_live_capture.py",
+        "worker/af_metrics.py",
+        "worker/af_model_config.py",
+        "worker/af_native_11_9_reference.py",
+        "worker/af_native_flux_map.py",
+        "worker/af_native_profile.py",
+        "worker/af_pairing.py",
+        "worker/af_port_only.py",
+        "worker/af_progress.py",
+        "worker/af_render_saved.py",
+        "worker/af_report_library.py",
+        "worker/af_report_summary.py",
+        "worker/af_report_v11.py",
+        "worker/af_report_v3.py",
+        "worker/af_rt0.py",
+        "worker/af_saved_analysis.py",
+        "worker/af_saved_compare.py",
+        "worker/af_set_compare.py",
+        "worker/af_species_exposure.py",
+        "worker/af_species_report.py",
+        "worker/af_target_lock.py",
+        "worker/af_wafer_patches.py",
+        "worker/af_wall_reaction.py",
+        "worker/af_wb_bootstrap.py",
+        "worker/af_wb_bridge.py",
+        "worker/af_wb_conditions.py",
+        "worker/af_wb_files.py",
+        "worker/af_wb_solver.py",
+        "worker/af_worker.py",
+        "worker/am_workbench_bridge.py"
+      ]
+    },
+    {
+      "archive": "zip@3522368/zip@0",
+      "project_file_count": 0,
+      "candidate_paths": []
+    }
   ],
   "recovered": [
     {
@@ -33,6 +104,16 @@
       "path": "templates/geometry_config_example_staggered.json",
       "sha256": "3f48f1628bcb72b049793911c28a506dbc5b5e677afd52411be055bb17014d17",
       "size": 1097
+    },
+    {
+      "path": "templates/report_v11/report.css",
+      "sha256": "fc331ea9c2dfb70fe3e2cc22f0a84e7230f257a51ad938490bf2193036f5dada",
+      "size": 32291
+    },
+    {
+      "path": "templates/report_v11/report.js",
+      "sha256": "cc0d77ab94f41a79e6430513814b580d5ff58bb1f43b96b104db4d755e8035ec",
+      "size": 49041
     },
     {
       "path": "templates/report_v11/report_template.html",
@@ -231,7 +312,7 @@
     },
     {
       "path": "worker/af_species_exposure.py",
-      "sha256": "986050100ea9a7d95952d0044216d09e559cbc7ee38870805eca208948245214",
+      "sha256": "4203d9e87361fe671872423a089bf48e9f4cbaee800714211990a0423052d840",
       "size": 15200
     },
     {
@@ -251,8 +332,8 @@
     },
     {
       "path": "worker/af_wall_reaction.py",
-      "sha256": "4376a565a4422abc82159b41e5f24015684bcdd5cc5f84fbe8ed0dc9ce46bf58",
-      "size": 29768
+      "sha256": "dae278eed8f976d88cff143eea94e4da2c24a1227fd0e0a68fa26d4b16b8dd2f",
+      "size": 29756
     },
     {
       "path": "worker/af_wb_bootstrap.py",
@@ -291,10 +372,83 @@
     }
   ],
   "conflicts": [],
-  "missing_core_files": [
-    "cmd/autofluent/main_windows.go",
-    "go.mod"
-  ],
   "missing_worker_imports": [],
-  "source_note": "56 original readable embedded project files; complete Go front-end/build sources not recovered. No executable was run. Static extraction is not a functional validation."
+  "missing_report_assets": [],
+  "go_frontend_source_recovered": false,
+  "comparison_to_previous_payload": {
+    "added": [
+      "templates/report_v11/report.css",
+      "templates/report_v11/report.js"
+    ],
+    "removed": [],
+    "changed": [
+      "worker/af_species_exposure.py",
+      "worker/af_wall_reaction.py"
+    ],
+    "unchanged": [
+      "assets/AutoFluent.ico",
+      "assets/AutoFluent_icon_512.png",
+      "assets/AutoFluent_source.png",
+      "templates/ALD-N2-100Pa-DRAFT.json",
+      "templates/geometry_config_example_staggered.json",
+      "templates/report_v11/report_template.html",
+      "worker/af_adaptive_compare.py",
+      "worker/af_adaptive_geometry.py",
+      "worker/af_adaptive_native.py",
+      "worker/af_baffle_openings.py",
+      "worker/af_bundle_diagnostics_selftest.py",
+      "worker/af_bundle_selftest.py",
+      "worker/af_bundle_species_selftest.py",
+      "worker/af_cff_rt0.py",
+      "worker/af_cff_topology.py",
+      "worker/af_codex_import.py",
+      "worker/af_common_cut_compare.py",
+      "worker/af_compare.py",
+      "worker/af_core.py",
+      "worker/af_dual_baffles.py",
+      "worker/af_flow_diagnostics.py",
+      "worker/af_geometry_precheck.py",
+      "worker/af_geometry_scout.py",
+      "worker/af_h5_batch.py",
+      "worker/af_h5_offline.py",
+      "worker/af_h5_schema.py",
+      "worker/af_live_capture.py",
+      "worker/af_metrics.py",
+      "worker/af_model_config.py",
+      "worker/af_native_11_9_reference.py",
+      "worker/af_native_flux_map.py",
+      "worker/af_native_profile.py",
+      "worker/af_pairing.py",
+      "worker/af_port_only.py",
+      "worker/af_progress.py",
+      "worker/af_render_saved.py",
+      "worker/af_report_library.py",
+      "worker/af_report_summary.py",
+      "worker/af_report_v11.py",
+      "worker/af_report_v3.py",
+      "worker/af_rt0.py",
+      "worker/af_saved_analysis.py",
+      "worker/af_saved_compare.py",
+      "worker/af_set_compare.py",
+      "worker/af_species_report.py",
+      "worker/af_target_lock.py",
+      "worker/af_wafer_patches.py",
+      "worker/af_wb_bootstrap.py",
+      "worker/af_wb_bridge.py",
+      "worker/af_wb_conditions.py",
+      "worker/af_wb_files.py",
+      "worker/af_wb_solver.py",
+      "worker/af_worker.py",
+      "worker/am_workbench_bridge.py"
+    ]
+  },
+  "baseline_commit": "cd4eb93fd68437783acf12a2547763e0518675b9",
+  "checks": {
+    "sha256": "pass",
+    "pe_signature": "pass",
+    "python_ast": "pass",
+    "json_parse": "pass",
+    "internal_worker_imports": "pass"
+  },
+  "source_note": "Static extraction only; original application files recovered verbatim. No EXE or recovered application code executed. Runtime dependencies and rebuildability not certified."
 }

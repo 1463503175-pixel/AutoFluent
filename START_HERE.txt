@@ -1,4 +1,4 @@
-AutoFluent Release 2.0 — 2026-11-22
+AutoFluent Release 2.1 — 2026-11-22
 运行 app/AutoFluent.exe，或从最新 Release 下载集成程序。
 离线分析无需 Workbench；在线工况与求解需明确确认。
 使用说明：docs/GETTING_STARTED.md

@@ -1,8 +1,8 @@
-# AutoFluent 2.0 快速开始
+# AutoFluent 2.1 快速开始
 
 ## 安装和运行
 
-下载 [AutoFluent.exe](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe)，保存到本地可写目录并双击运行。本次发布为一体化 Windows x64 程序。
+下载 [AutoFluent.exe](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.1/AutoFluent.exe)，保存到本地可写目录并双击运行。本次发布为一体化 Windows x64 程序。
 
 ## 保存解分析
 
@@ -20,4 +20,4 @@
 
 [分析引擎](../worker/) · [配置和报告模板](../templates/) · [恢复清单](release_inventory.json) · [SHA-256](../SHA256SUMS.txt)
 
-本仓库只有当前 Release 2.0 的集成程序及可恢复项目源码。EXE 不包含完整可恢复的 Go 前端源码与构建定义。静态核验不代表真实 H5 或 Windows 实机功能已经验收。
+本仓库只有当前 Release 2.1 的集成程序及可恢复项目源码。EXE 不包含完整可恢复的 Go 前端源码与构建定义。静态核验不代表真实 H5 或 Windows 实机功能已经验收。
