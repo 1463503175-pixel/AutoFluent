@@ -29,7 +29,7 @@
 |---|---|
 | [Release 2.0](https://github.com/1463503175-pixel/AutoFluent/releases/tag/2.0) · 2026-11-22 · [AutoFluent.exe](https://github.com/1463503175-pixel/AutoFluent/releases/download/2.0/AutoFluent.exe) | 原 V2.10.5 源码为可追溯基线；新版 EXE 中可恢复的原始文件通过静态拆包流程核验。 |
 
-查看 [拆包工作流](https://github.com/1463503175-pixel/AutoFluent/actions/workflows/sync-integrated-release.yml)。未通过源码完整性校验前，不将旧源码标为新版。历史 V2.10.5 下载包继续保留。
+查看 [拆包结果与源码归属](release_payload/2.0/README.md) · [拆包工作流](https://github.com/1463503175-pixel/AutoFluent/actions/workflows/sync-integrated-release.yml)。新版 EXE 与 Worker 可以独立校验；Go 桌面完整源代码若未内嵌，仍为旧版基线，不能声称与新版 EXE 可重现构建。历史 V2.10.5 下载包继续保留。
 
 ## From simulation to insight
 
