@@ -5,6 +5,9 @@ Coordinates are physical metres. A configuration is a constraint on measured
 geometry, not a source for invented counts, fluxes or pressures. Unsupported
 coordinate conventions fail early instead of silently reusing 11.9 geometry.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import json
 import math
 from pathlib import Path

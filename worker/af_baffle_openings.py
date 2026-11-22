@@ -5,6 +5,9 @@ Only an explicitly closed ring of wall-face boundary edges can represent an
 opening. A connected cut component never, by itself, certifies a physical hole.
 Topology mismatch is diagnostic; unassigned face flux is retained for closure.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from collections import Counter, defaultdict
 import numpy as np
 

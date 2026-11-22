@@ -6,6 +6,9 @@ row faces at the SAME X station remain distinct objects. This is deliberately
 conservative: ambiguous component connectivity / thickness pairings are reported
 as geometry errors, not silently assigned.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from collections import defaultdict
 import numpy as np
 
@@ -355,8 +358,17 @@ def pair_wafer_patches(patches, *, thickness_range, row_ranges, min_plates=5,
         if not valid:
             raise PatchRecognitionError('No repeated wafer run in row %d; candidate patches are isolated' %(row+1))
         if len(valid)>1:
-            raise PatchRecognitionError('Multiple plausible repeated wafer arrays in row %d; narrow wafer_x_range_m' %(row+1))
-        chosen=valid[0]
+            pitches=np.asarray([np.median(np.diff([q['xlo'] for q in g])) for g in valid])
+            footprints=np.asarray([[np.median([q[key] for q in g])
+                                    for key in ('ylo','yhi','zlo','zhi')] for g in valid])
+            spans=np.min(footprints[:,[1,3]]-footprints[:,[0,2]],axis=0)
+            compatible=(np.ptp(pitches)<=np.median(pitches)*.10 and
+                        np.all(np.ptp(footprints,axis=0)<=np.repeat(spans,2)*.10))
+            if not compatible:
+                raise PatchRecognitionError('Multiple incompatible repeated wafer arrays in row %d' %(row+1),
+                                            stage='row_assignment',diagnostics=diagnostics)
+        # Matching banks separated by a wide bypass are one physical row.
+        chosen=[q for group in valid for q in group]
         _record(diagnostics,identified_row_wafer_counts=[sum(q['row']==ri for q in pairs) for ri in range(len(row_ranges))])
         dropped=[q for q in plate if q not in chosen]
         for q in dropped:excluded.append({'x_m':q['xlo'],'reason':'isolated_paired_patch_outside_repeated_array'})

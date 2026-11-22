@@ -1,4 +1,7 @@
 """JSON-line worker. stdout is one JSON response; stderr is not a transport."""
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import json
 import sys
 import traceback

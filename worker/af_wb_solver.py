@@ -8,6 +8,9 @@ A durable lease remains after unconfirmed remote execution.  Only a positively
 verified transcript with an iteration table can mark an operator-authorized
 solve command observed. Residuals alone cannot certify convergence.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import argparse
 import json
 import os
@@ -107,7 +110,7 @@ def make_wb_script(system, container, transcript, receipt, iterations):
         '_af_trn=u%s' % json.dumps(str(trn).replace('\\', '/')),
         '_af_receipt=u%s' % json.dumps(str(rec).replace('\\', '/')),
         'if os.path.exists(_af_trn): raise Exception("Transcript already exists")',
-        '_af_c.SendCommand(Command=%s)' % json.dumps(start),
+        '_af_c.SendCommand(Command=u%s)' % json.dumps(start),
         'if not os.path.isfile(_af_trn): raise Exception("Transcript not started; no iterations sent")',
         '_af_f=open(_af_receipt, "w")',
         '_af_f.write(json.dumps({"state":"iterate_submitted","epoch":time.time()}))',

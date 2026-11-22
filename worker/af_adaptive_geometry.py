@@ -7,6 +7,9 @@ Return an auditable geometry profile or fail closed. This first implementation
 supports wafer normals X, flow Y, one/two separated rows along Z, and one/two
 non-overlapping layers along Y. Staggered Z rows may have different X stations.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import math
 from dataclasses import dataclass
 
@@ -382,6 +385,19 @@ def partition_cut_faces(points, signed_flux, layer, *, min_faces_per_channel=1):
         common_lo=max(row['face_positions_lo_m'][0] for row in layer['rows'])
         common_hi=min(row['face_positions_hi_m'][-1] for row in layer['rows'])
         end_x|=outer&between&((ctr[:,0]<common_lo)|(ctr[:,0]>common_hi))
+    front=outer&(ctr[:,0]<x_min)
+    back=outer&(ctr[:,0]>x_max)
+    for row in layer['rows']:
+        band=(ctr[:,2]>=row['z_min_m'])&(ctr[:,2]<=row['z_max_m'])
+        front|=outer&band&(ctr[:,0]<row['face_positions_lo_m'][0])
+        back|=outer&band&(ctr[:,0]>row['face_positions_hi_m'][-1])
+    if len(layer['rows'])==2:
+        front|=outer&between&(ctr[:,0]<common_lo)
+        back|=outer&between&(ctr[:,0]>common_hi)
+    six_masks={'wafer':wafer,'central':center,'left':outer&~end_x&(ctr[:,2]<midpoint),
+               'right':outer&~end_x&(ctr[:,2]>=midpoint),'front':front,'back':back}
+    if np.any(sum(mask.astype(np.int8) for mask in six_masks.values())!=1):
+        raise RuntimeError('Six physical regions are not mutually exclusive and exhaustive')
     total=float(q.sum(dtype=np.float64));parts={k:float(q[m].sum(dtype=np.float64)) for k,m in
         (('wafer',wafer),('central',center),('outer_low_z',left),('outer_high_z',right))}
     if abs(sum(parts.values())-total)>max(1e-13,abs(total)*1e-8):
@@ -405,11 +421,21 @@ def partition_cut_faces(points, signed_flux, layer, *, min_faces_per_channel=1):
     bypass_subregions={'central_x_wide_gap':central_x,'central_z_between_rows':central_z,
                        'outer_x_end_subset':end_x}
     directional_bypass={name:directional(mask) for name,mask in bypass_subregions.items()}
+    six={name:directional(mask) for name,mask in six_masks.items()}
+    if any(abs(sum(v[key] for v in six.values())-target)>tolerance for key,target in
+           (('net_kg_s',total),('positive_kg_s',full_positive),('negative_magnitude_kg_s',full_reverse))):
+        raise RuntimeError('Six physical region signed fluxes do not close')
+    region_geometry={'axes':{'front':'X-','back':'X+','left':'Z-','right':'Z+'},
+        'corner_ownership':'X end regions take precedence; no corner counted twice',
+        'cut_bbox_xz_m':[float(ctr[:,0].min()),float(ctr[:,0].max()),float(ctr[:,2].min()),float(ctr[:,2].max())],
+        'rows':[{'row':i+1,'x_min_m':float(r['face_positions_lo_m'][0]),'x_max_m':float(r['face_positions_hi_m'][-1]),
+                 'z_min_m':float(r['z_min_m']),'z_max_m':float(r['z_max_m'])} for i,r in enumerate(layer['rows'])]}
     net=np.array([x['net_kg_s'] for x in channels]);mean=float(net.mean()) if len(net) else 0.
     cv=100*float(net.std())/abs(mean) if abs(mean)>1e-30 else None
     return {'status':'candidate_native_cut_partition','channel_count':len(channels),
             'channels':channels,'parts_net_kg_s':parts,'whole_cut_kg_s':total,
             'parts_directional_kg_s':directional_parts,
+            'six_regions_directional_kg_s':six,'six_region_geometry':region_geometry,
             'bypass_directional_kg_s':directional_bypass,
             'cv_pct':cv,'positive_kg_s':full_positive,
             'negative_magnitude_kg_s':full_reverse,

@@ -4,6 +4,9 @@
 Supports the compact '当前解只读统计.html' table exported in November 2026.
 The numbers are read from an external report, not independently checked against Case/Data.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import hashlib
 from html.parser import HTMLParser
 import json

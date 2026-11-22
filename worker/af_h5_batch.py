@@ -2,6 +2,9 @@
 """Read-only bounded inventory of Fluent saved Case/Data pairs.
 No CFD field extraction or physical metrics are inferred from filenames.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import argparse
 import html
 import json

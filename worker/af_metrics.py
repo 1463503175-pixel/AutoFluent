@@ -2,6 +2,9 @@
 
 Input is an exported, verified mass-flux partition; not an interpolation of velocity.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import json
 import math
 import statistics

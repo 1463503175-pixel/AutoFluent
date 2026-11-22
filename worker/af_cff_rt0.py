@@ -8,6 +8,9 @@ explicit confirmation that native flux is positive outward of c0.  Without
 that confirmation an integration is refused.  For large production H5 cases
 we need partition-aware streaming and geometric wafer-cut construction.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import math
 from pathlib import Path
 

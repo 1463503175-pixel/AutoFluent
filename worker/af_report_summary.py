@@ -4,6 +4,9 @@
 No field is invented. A successful HDF5 read must not be presented as a
 successful physical measurement. Two serial wafer-cut fractions are not summed.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import html
 import math
 import re

@@ -4,6 +4,9 @@
 All outputs remain provisional until geometry, boundary settings, sign
 conventions and convergence have been independently verified.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import json
 import math
 
@@ -24,6 +27,8 @@ def _unpack(data):
                 'imbalance_pct':ports['mass_imbalance_pct'],
                 'pressure_drop_pa':data.get('pressure',{}).get('pressure_drop_pa'),
                 'geometry':data.get('geometry'),
+                'diagnostics':data.get('flow_diagnostics') or {},
+                'raw_metrics':data,
                 'port_zones':ports.get('boundary_zones',[]),
                 'pressure_definition':data.get('pressure',{}).get('definition'),
                 'pressure_status':data.get('pressure',{}).get('status'),
@@ -159,7 +164,17 @@ def compare_native_saved(a,b):
         qa=sorted(ba['holes'],key=lambda h:(round(h['center_m'][0],7),round(h['center_m'][2],7)))
         qb=sorted(bb['holes'],key=lambda h:(round(h['center_m'][0],7),round(h['center_m'][2],7)))
         baffle_compare['hole_net_delta_by_position_kg_s']=[v['net_kg_s']-u['net_kg_s'] for u,v in zip(qa,qb)]
+    localization={}
+    if x.get('diagnostics') or y.get('diagnostics'):
+        from af_flow_diagnostics import compare_pressure_diagnostics,geometry_changes
+        localization={'pressure_comparison':compare_pressure_diagnostics(x.get('diagnostics',{}),y.get('diagnostics',{})),
+                      'geometry_changes':geometry_changes(x.get('raw_metrics',{}),y.get('raw_metrics',{})),
+                      'channel_diagnostics':[x.get('diagnostics',{}).get('channels',{}),y.get('diagnostics',{}).get('channels',{})]}
+    if localization and not port_pressure_candidate:
+        for row in localization['pressure_comparison']['segments']:row['delta_pa']=None
+        localization['pressure_comparison']['note']='端口、入口流量或守恒资格不足，分段差值未取得。'
     return {'schema':'autofluent.native_saved_compare.v1',
+            'flow_diagnostics':localization,
             'status':'provisional_only_not_qualified',
             'input_models':[x['case'],y['case']],
             'methods':[x['method'],y['method']],

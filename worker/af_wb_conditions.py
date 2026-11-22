@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """Workbench Fluent .set transfer with before/after *file* evidence.
 
-A .set file includes USER-MODIFIED settings only. It is not a complete case
+A .set file records settings without mesh or field data. It is not a complete case
 or independent proof of defaults, zone matching, mesh topology or material
 properties. Publication requires operator approval and leaves the solver
 unchanged unless it reaches exactly one /file/read-settings command.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import argparse
 import hashlib
 import difflib
@@ -19,6 +22,9 @@ import time
 import uuid
 
 from af_live_capture import fluent_tui_argument
+from af_wb_files import transport_file,discard_transport
+from af_set_compare import compare_settings_files,zone_signature
+from af_progress import update,fail
 from af_wb_solver import atomic_json, timestamp
 
 SYSTEM_RE = re.compile(r'^[A-Za-z0-9_.-]{1,128}$')
@@ -37,9 +43,9 @@ def sha(path):
 
 def validate_source(source, app_dir):
     p=Path(source).resolve(strict=True)
-    root=Path(app_dir).resolve(strict=True)/'settings_exports'
-    if not p.is_file() or p.suffix.lower()!='.set' or p.parent!=root:
-        raise ValueError('Standard .set must be selected from AutoFluent settings_exports directory')
+    if not p.is_file() or p.suffix.lower()!='.set':
+        raise ValueError('请选择 Fluent 导出的 .set 工况文件')
+    sha(p)
     return p
 
 
@@ -56,13 +62,17 @@ def current_identity(wb, systems, target, expected_project, reader):
 
 
 def preview(wb, systems, system, source, app_dir, expected_project, project_reader, export):
+    update(15,"核验当前工程与源工况")
     target, actual=current_identity(wb,systems,system,expected_project,project_reader)
     source=validate_source(source,app_dir)
     src_sha=sha(source)
     # Read the current target configuration FIRST; this is non-mutating.
+    update(20,"导出当前工况快照","不会修改设置或启动求解")
     before=export(wb,systems,system,str(Path(app_dir)/'settings_exports'))
     if before.get('status')!='settings_exported':
         raise RuntimeError('Fluent did not produce a verified pre-publication settings file')
+    if zone_signature(source)!=zone_signature(before['file']):
+        raise RuntimeError('源与当前模型的区域名称、类型或相定义不匹配；未提交导入，请先核对区域映射')
     jobs=Path(app_dir)/'settings_jobs'
     jobs.mkdir(parents=True,exist_ok=True)
     token=uuid.uuid4().hex
@@ -74,7 +84,7 @@ def preview(wb, systems, system, source, app_dir, expected_project, project_read
            'same_raw_settings_file':src_sha==before['sha256'],
            'zone_mapping_independently_verified':False,
            'defaults_verified':False,
-           'note':'仅对比用户修改设置文件；不同几何/版本的默认项、zone映射和材料需在 Fluent 逐项核验。'}
+           'note':'对比设置文件内容；不同几何/版本中未覆盖的选项、区域映射和材料需独立核验。'}
     # Human-readable byte/text difference for the operator; NOT a semantic
     # comparison of default values or Fluent zone mappings.
     source_bytes=source.read_bytes()
@@ -90,6 +100,7 @@ def preview(wb, systems, system, source, app_dir, expected_project, project_read
     diff_file.write_text(diff[:40000],encoding='utf-8')
     state.update(diff_file=str(diff_file),diff_scope='raw_modified_settings_files_only')
     atomic_json(file,state)
+    update(30,"源与目标设置差异已记录")
     return dict(state,plan_file=str(file))
 
 
@@ -110,7 +121,7 @@ def build_apply_script(system,container,source,receipt):
         '_af_f=open(_af_receipt,"w")',
         '_af_f.write(json.dumps({"status":"read_settings_submitted","epoch":time.time()}))',
         '_af_f.close()',
-        '_af_c.SendCommand(Command=%s)' % json.dumps(cmd),
+        '_af_c.SendCommand(Command=u%s)' % json.dumps(cmd),
         '_af_f=open(_af_receipt,"w")',
         '_af_f.write(json.dumps({"status":"read_settings_returned","epoch":time.time()}))',
         '_af_f.close()',
@@ -137,41 +148,58 @@ def apply(wb, systems, system, plan_file, app_dir, expected_project, project_rea
     if sha(source)!=state['source_sha256'] or sha(state['before_file'])!=state['before_sha256']:
         raise RuntimeError('Standard source or archived target snapshot changed')
     # Confirm current Fluent settings have not changed since the preview.
+    update(40,"再次核验当前设置未变化")
     current=export(wb,systems,system,str(Path(app_dir)/'settings_exports'))
     if current.get('status')!='settings_exported' or current.get('sha256')!=state['before_sha256']:
         raise RuntimeError('Current Fluent settings changed since preflight; no read-settings sent')
+    transport_source=transport_file(source,read=True)
+    if sha(transport_source)!=state['source_sha256']:raise RuntimeError('内部源文件摘要不一致')
     from af_target_lock import acquire_target,release_confirmed
-    target_lock=acquire_target(Path(app_dir).resolve(),actual,system,state['container'],state['id'],'publication')
+    try:
+        target_lock=acquire_target(Path(app_dir).resolve(),actual,system,state['container'],state['id'],'publication')
+    except BaseException:
+        discard_transport(transport_source)
+        raise
     lock=jobs/'active_publication.lock'
     try:
         with lock.open('x',encoding='utf-8') as f:
             f.write(state['id'])
     except BaseException:
         release_confirmed(target_lock,state['id'])
+        discard_transport(transport_source)
         raise
     receipt=jobs/(state['id']+'.receipt.json')
     # Mark irreversible submission boundary before giving script to WB.
-    state.update(status='publication_dispatching',started_at=timestamp())
+    state.update(status='publication_dispatching',started_at=timestamp(),transport_source_file=str(transport_source))
     atomic_json(file,state)
     try:
-        raw=wb.run_script_string(build_apply_script(system,state['container'],source,receipt))
+        update(65,"Fluent 正在读取工况","只提交一次，不初始化、不迭代")
+        raw=wb.run_script_string(build_apply_script(system,state['container'],transport_source,receipt))
         if not receipt.is_file():
             raise RuntimeError('No independent WB receipt; remote state unknown')
         evidence=json.loads(receipt.read_text(encoding='utf-8'))
         if evidence.get('status')!='read_settings_returned':
             raise RuntimeError('Workbench settings command return unconfirmed')
+        update(80,"导出设置进行回读")
         after=export(wb,systems,system,str(Path(app_dir)/'settings_exports'))
         if after.get('status')!='settings_exported':
             raise RuntimeError('Cannot obtain Fluent after-settings for readback')
-        state.update(status=('user_modified_settings_readback_match' if after['sha256']==state['source_sha256']
+        update(90,"核对边界、材料及求解设置")
+        comparison=compare_settings_files(source,after['file'])
+        state.update(status=('user_modified_settings_readback_match' if comparison['match']
                              else 'readback_mismatch_needs_review'),
                      after_file=after['file'],after_sha256=after['sha256'],finished_at=timestamp(),
+                     readback_comparison=comparison,raw_files_identical=after['sha256']==state['source_sha256'],
                      full_physics_verified=False,zone_mapping_independently_verified=False,
                      defaults_verified=False)
         atomic_json(file,state)
         if state['status']=='user_modified_settings_readback_match':
+            discard_transport(transport_source)
             lock.unlink(missing_ok=True)
             release_confirmed(target_lock,state['id'])
+            update(100,"工况导入与设置回读完成","未初始化或迭代")
+        else:
+            update(95,"回读有差异，已停止后续操作","保留快照与任务锁，请核对差异")
         # A mismatch retains the lease: don't let a later click overwrite the scene.
         return dict(state,plan_file=str(file),active_lock_retained=lock.exists(),
                     shared_target_lock_retained=target_lock.exists())
@@ -183,7 +211,7 @@ def apply(wb, systems, system, plan_file, app_dir, expected_project, project_rea
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--mode',choices=['preview','publish'],required=True)
+    p.add_argument('--mode',choices=['preview','publish','import'],required=True)
     p.add_argument('--port',type=int,required=True)
     p.add_argument('--security',choices=['mtls','insecure','wnua'],required=True)
     p.add_argument('--system',required=True)
@@ -198,18 +226,24 @@ def main():
                                   read_project_identity,export_existing_fluent_settings)
         if not 1024<=a.port<=65535 or not os.path.isabs(a.app_dir):
             raise ValueError('Invalid explicit WB port or app data folder')
+        update(5,"连接已选定的 Workbench")
         wb=connect(a.port,a.security)
         _wb_only_handshake(wb)
         systems=list_fluent_systems(wb)
-        if a.mode=='preview':
+        if a.mode in ('preview','import'):
             outcome=preview(wb,systems,a.system,a.source,a.app_dir,a.expected_project,
                             read_project_identity,export_existing_fluent_settings)
+            if a.mode=='import':
+                outcome=apply(wb,systems,a.system,outcome['plan_file'],a.app_dir,a.expected_project,
+                              read_project_identity,export_existing_fluent_settings,approved=a.approved)
         else:
             outcome=apply(wb,systems,a.system,a.plan,a.app_dir,a.expected_project,
                           read_project_identity,export_existing_fluent_settings,approved=a.approved)
+        if a.mode=='preview':update(100,"工况差异预检完成")
         print(json.dumps(outcome,ensure_ascii=False))
         return 0
     except Exception as exc:
+        fail("工况任务失败或未确认",str(exc))
         print(json.dumps({'status':'error_or_unconfirmed','detail':str(exc)},ensure_ascii=False))
         return 1
 

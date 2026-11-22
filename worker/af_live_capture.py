@@ -6,6 +6,9 @@ The only temporary solver action is a transcript bracket around the built-in
 /report/summary and /file/show-configuration reports. This is *not* a mass-flux
 postprocessor and cannot certify physical-condition equality.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import hashlib
 import json
 import os
@@ -13,6 +16,7 @@ from pathlib import Path
 import re
 import time
 import uuid
+from af_wb_files import transport_file,publish_export
 
 _SYSTEM = re.compile(r'^[A-Za-z0-9_.-]{1,128}$')
 
@@ -22,7 +26,7 @@ def report_path(folder):
     root = Path(folder).resolve()
     if not root.is_dir():
         raise ValueError('Report destination directory does not exist')
-    return root / ('fluent_live_%s_%s.trn' % (time.strftime('%Y%m%d_%H%M%S'), uuid.uuid4().hex[:12]))
+    return root / ('当前工况摘要_%s_%s.trn' % (time.strftime('%Y%m%d_%H%M%S'), uuid.uuid4().hex[:12]))
 
 
 def fluent_tui_argument(path):
@@ -63,7 +67,7 @@ def build_script(system, container, path):
         '_af_c.GetFluentLauncherSettings()',
         '_af_path=u%s' % json.dumps(str(path).replace('\\', '/')),
         'if os.path.exists(_af_path): raise Exception("Refusing to overwrite transcript")',
-        '_af_c.SendCommand(Command=%s)' % json.dumps(start),
+        '_af_c.SendCommand(Command=u%s)' % json.dumps(start),
         'if not os.path.isfile(_af_path):',
         '    raise Exception("Transcript did not start; no stop command sent")',
         'try:',
@@ -119,16 +123,18 @@ def capture_live_report(wb, systems, selection, output_dir, expected_project='',
         if not actual or os.path.normcase(os.path.normpath(actual)) != os.path.normcase(os.path.normpath(expected_project)):
             raise RuntimeError('Workbench project changed; abort before sending any command')
     output = report_path(output_dir)
-    script = build_script(selection, matching[0].get('container') or 'Setup',output)
+    transport=transport_file(output)
+    script = build_script(selection, matching[0].get('container') or 'Setup',transport)
     # One and only one dispatch; no retry even if a transport error or None.
     try:
         wb.run_script_string(script)
     except Exception as exc:
-        result = examine_report(output, selection, expected_project)
+        result = examine_report(transport, selection, expected_project)
         result.update(status='report_dispatch_uncertain', detail='Workbench command return failed; do not automatically repeat: '+str(exc)[:180])
         return result
     for _ in range(8):
-        if output.is_file() and output.stat().st_size>=200:
+        if transport.is_file() and transport.stat().st_size>=200:
             break
         time.sleep(.25)
+    if transport.is_file():publish_export(transport,output)
     return examine_report(output, selection, expected_project)

@@ -4,6 +4,9 @@
 Source files are never modified. Historical reports are NOT independently
 verified against Fluent Case/Data and cannot be used for official ranking.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import argparse
 import html
 import json

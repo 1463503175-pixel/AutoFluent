@@ -6,6 +6,9 @@ from relevant mesh/connectivity/flux datasets when safe. It never copies mesh
 or field arrays in full, and it does not upload data anywhere. The snapshot is
 for implementing real Fluent H5 adapters, not for deriving physical results.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from pathlib import Path
 import json
 import math

@@ -1,4 +1,7 @@
 """Workbench server bootstrap compatible with AutoMesh, for standalone AF installs."""
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import json
 import os
 from pathlib import Path
@@ -10,7 +13,7 @@ from af_wb_bridge import listeners
 
 def bootstrap():
     before = listeners()
-    helper=Path(__file__).with_name('af_start_wb_server_uia.ps1')
+    helper=Path(__file__).with_name('start_wb_server_uia.ps1')
     if os.name!='nt' or not helper.is_file():
         return {'status':'unavailable','detail':'Win32 helper missing','candidate_ports':[]}
     exe=Path(os.environ.get('SystemRoot','C:/Windows'))/'System32'/'WindowsPowerShell'/'v1.0'/'powershell.exe'

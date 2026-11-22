@@ -9,6 +9,9 @@ RT0 vector field on each tetrahedron has form q(x) = a + b*x, b scalar.
 This reproduces every supplied face integral exactly up to roundoff and is
 conservative on arbitrary planar sections. It is NOT an arbitrary CFD solver.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import math
 
 

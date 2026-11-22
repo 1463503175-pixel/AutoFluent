@@ -1,6 +1,11 @@
 """Compare two locally imported flux exports without pretending to read Fluent."""
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import json
 import sys
+import re
+import html
 from pathlib import Path
 from af_metrics import flux_metrics
 from af_codex_import import import_saved_report
@@ -51,10 +56,19 @@ def read_limited(path):
                 return raw
         except (UnicodeError,ValueError):
             pass
+    if f.suffix.lower() in ('.html','.htm'):
+        text=f.read_text(encoding='utf-8-sig')
+        match=re.search(r'<script\b[^>]*\bid=["\']afReportData["\'][^>]*>(.*?)</script\s*>',text,re.S|re.I)
+        if match:
+            raw=json.loads(match.group(1))
+            metrics=raw.get('meta') if isinstance(raw,dict) else None
+            if not isinstance(metrics,dict) or metrics.get('schema')!='autofluent.adaptive_native.v1':
+                raise ValueError('报告中没有可比较的原始分析数据；请选择分析 JSON')
+            return metrics
     return import_saved_report(f)
 
 if __name__=='__main__':
-    if len(sys.argv)!=3:raise SystemExit('usage: af_compare.py modelA.json modelB.json')
+    if len(sys.argv) not in (3,4):raise SystemExit('usage: af_compare.py modelA.json modelB.json [report_directory]')
     a,b=read_limited(sys.argv[1]),read_limited(sys.argv[2])
     if a.get('schema') in ('autofluent.native_flux_metrics.v1','autofluent.adaptive_native.v1') or b.get('schema') in ('autofluent.native_flux_metrics.v1','autofluent.adaptive_native.v1'):
         if a.get('schema')==b.get('schema')=='autofluent.native_flux_metrics.v1':
@@ -68,4 +82,17 @@ if __name__=='__main__':
             result=compare_saved_results(a,b)
     else:
         result=compare_records(a,b)
+    try:
+        import uuid
+        from af_flow_diagnostics import render_comparison_html
+        folder=Path(sys.argv[3]) if len(sys.argv)==4 else Path(sys.argv[1]).resolve().parent/'模型对比'
+        folder.mkdir(parents=True,exist_ok=True)
+        report=folder/('偏流与压降对比_'+uuid.uuid4().hex[:10]+'.html')
+        with report.open('x',encoding='utf-8') as f:
+            page=render_comparison_html(result)
+            details='<details><summary>完整对比数值</summary><pre>'+html.escape(json.dumps(result,ensure_ascii=False,indent=2))+'</pre></details>'
+            f.write(page.replace('</main>',details+'</main>'))
+        result['html_file']=str(report)
+    except (OSError,ValueError,KeyError,TypeError) as exc:
+        result['report_export_error']=str(exc)[:350]
     print(json.dumps(result,ensure_ascii=False,indent=2))

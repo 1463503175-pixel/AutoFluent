@@ -4,6 +4,9 @@
 Never infer a snapshot from a numbered data filename or silently choose from
 multiple matching saved solution snapshots. Pure metadata reads, no mesh load.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from pathlib import Path
 
 CAS_SUFFIX = '.cas.h5'

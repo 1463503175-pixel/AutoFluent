@@ -3,6 +3,9 @@
 The API is intentionally narrow.  Unknown settings and boundary types fail closed.
 """
 from __future__ import annotations
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import copy
 import hashlib
 import json

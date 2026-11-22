@@ -4,6 +4,9 @@
 The lock is intentionally retained on unknown WB/Fluent outcomes, and can
 only be cleared via an explicit independent recovery check outside this code.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import hashlib
 import json
 import os

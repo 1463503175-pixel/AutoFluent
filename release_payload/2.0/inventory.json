@@ -3,28 +3,370 @@
   "asset": "AutoFluent.exe",
   "size": 32208896,
   "sha256": "d3b374cf79413c248d7d1ff0178cda4ef8b2d0fd8e273cd08b6e41b3f589aed1",
-  "status": "conflicting_payload",
+  "status": "worker_source_synced_go_not_recovered",
   "archives": [
     "zip@3522368",
     "zip@3522368/zip@0"
   ],
-  "conflicts": [
-    "tests/__init__.py",
-    "tests/test_deprecations.py",
-    "tests/test_dtype.py",
-    "tests/test_function_base.py",
-    "tests/test_multiarray.py",
-    "tests/test_numeric.py",
-    "tests/test_polynomial.py",
-    "tests/test_regression.py",
-    "tests/test_shape_base.py",
-    "tests/test_utils.py"
+  "archive_scopes": [
+    {
+      "archive": "zip@3522368",
+      "project_file_count": 56,
+      "candidate_paths": [
+        "assets/AutoFluent.ico",
+        "assets/AutoFluent_icon_512.png",
+        "assets/AutoFluent_source.png",
+        "templates/ALD-N2-100Pa-DRAFT.json",
+        "templates/geometry_config_example_staggered.json",
+        "templates/report_v11/report_template.html",
+        "worker/af_adaptive_compare.py",
+        "worker/af_adaptive_geometry.py",
+        "worker/af_adaptive_native.py",
+        "worker/af_baffle_openings.py",
+        "worker/af_bundle_diagnostics_selftest.py",
+        "worker/af_bundle_selftest.py",
+        "worker/af_bundle_species_selftest.py",
+        "worker/af_cff_rt0.py",
+        "worker/af_cff_topology.py",
+        "worker/af_codex_import.py",
+        "worker/af_common_cut_compare.py",
+        "worker/af_compare.py",
+        "worker/af_core.py",
+        "worker/af_dual_baffles.py",
+        "worker/af_flow_diagnostics.py",
+        "worker/af_geometry_precheck.py",
+        "worker/af_geometry_scout.py",
+        "worker/af_h5_batch.py",
+        "worker/af_h5_offline.py",
+        "worker/af_h5_schema.py",
+        "worker/af_live_capture.py",
+        "worker/af_metrics.py",
+        "worker/af_model_config.py",
+        "worker/af_native_11_9_reference.py",
+        "worker/af_native_flux_map.py",
+        "worker/af_native_profile.py",
+        "worker/af_pairing.py",
+        "worker/af_port_only.py",
+        "worker/af_progress.py",
+        "worker/af_render_saved.py",
+        "worker/af_report_library.py",
+        "worker/af_report_summary.py",
+        "worker/af_report_v11.py",
+        "worker/af_report_v3.py",
+        "worker/af_rt0.py",
+        "worker/af_saved_analysis.py",
+        "worker/af_saved_compare.py",
+        "worker/af_set_compare.py",
+        "worker/af_species_exposure.py",
+        "worker/af_species_report.py",
+        "worker/af_target_lock.py",
+        "worker/af_wafer_patches.py",
+        "worker/af_wall_reaction.py",
+        "worker/af_wb_bootstrap.py",
+        "worker/af_wb_bridge.py",
+        "worker/af_wb_conditions.py",
+        "worker/af_wb_files.py",
+        "worker/af_wb_solver.py",
+        "worker/af_worker.py",
+        "worker/am_workbench_bridge.py"
+      ]
+    },
+    {
+      "archive": "zip@3522368/zip@0",
+      "project_file_count": 0,
+      "candidate_paths": []
+    }
   ],
+  "conflicts": [],
   "missing_core_files": [
     "cmd/autofluent/main_windows.go",
     "go.mod"
   ],
-  "recovered": [],
+  "worker_synced": true,
+  "missing_worker_imports": [],
+  "worker_missing_vs_baseline": [],
+  "recovered": [
+    {
+      "path": "assets/AutoFluent.ico",
+      "sha256": "1539d5b311f11a8cc96a3659f053edd4340b054a052be8a2c36745f0ae0b308d",
+      "size": 135992
+    },
+    {
+      "path": "assets/AutoFluent_icon_512.png",
+      "sha256": "d4d7e2e5c6d1694a643ca41467251d4fd68c73b20a6ca849691b9d91e1fafb4c",
+      "size": 287433
+    },
+    {
+      "path": "assets/AutoFluent_source.png",
+      "sha256": "03b2b28fc30cc5680fe001e8bea55cbb9ddcf47fe41f2b5ff42d8ae2295455bd",
+      "size": 1126664
+    },
+    {
+      "path": "templates/ALD-N2-100Pa-DRAFT.json",
+      "sha256": "c756ba491533eda14795924b7ef8d70e65accb0b6eb9484994ba8fe83a13698a",
+      "size": 862
+    },
+    {
+      "path": "templates/geometry_config_example_staggered.json",
+      "sha256": "3f48f1628bcb72b049793911c28a506dbc5b5e677afd52411be055bb17014d17",
+      "size": 1097
+    },
+    {
+      "path": "templates/report_v11/report_template.html",
+      "sha256": "79f87efef3b79aab38c67931c0e7a3f02b23fd78be14d9aaba8e7d2c6ec02401",
+      "size": 9094
+    },
+    {
+      "path": "worker/af_adaptive_compare.py",
+      "sha256": "f3d066f7cce481785af173765dc8e8e34c7570a414764341d7e9be2fdaa67b3c",
+      "size": 12115
+    },
+    {
+      "path": "worker/af_adaptive_geometry.py",
+      "sha256": "8e6a30b9e93419803f28550068d7b8a0d0ba9a13c3087ea58cde67eae2e1c0db",
+      "size": 37042
+    },
+    {
+      "path": "worker/af_adaptive_native.py",
+      "sha256": "342c6862ca243fe2ae0f528117264d55e4a318da915683ec9a7bf9ceeeef0184",
+      "size": 88357
+    },
+    {
+      "path": "worker/af_baffle_openings.py",
+      "sha256": "b68c8f0c0801d0e346adcce9b18f7d755f020d4a896faaed2f1f9082708052dc",
+      "size": 7727
+    },
+    {
+      "path": "worker/af_bundle_diagnostics_selftest.py",
+      "sha256": "e1991277ffbd681727d257aed7e1121e3449fc6ff2545f025b873b42cfdf3afc",
+      "size": 4466
+    },
+    {
+      "path": "worker/af_bundle_selftest.py",
+      "sha256": "c1993e67611e1b5993ab6c2f5a4bce3e39fbb4fa535754a75b070c5ee13f9a40",
+      "size": 8208
+    },
+    {
+      "path": "worker/af_bundle_species_selftest.py",
+      "sha256": "a09b7b6af8a862fc3e048dfe46c77cf66610dc602e0f1cc26de3b1fbf1a5d0c6",
+      "size": 6224
+    },
+    {
+      "path": "worker/af_cff_rt0.py",
+      "sha256": "33b645924aac2424672ad51dbe60ec53beaa01ff23485c03a1118f8776b35b12",
+      "size": 8924
+    },
+    {
+      "path": "worker/af_cff_topology.py",
+      "sha256": "89a85392e61cb492fcd208adac7be5129b1e4834bf5374226a2c4aa9ea815a35",
+      "size": 10377
+    },
+    {
+      "path": "worker/af_codex_import.py",
+      "sha256": "5bd76abaaaf4306b4d2814cd59e234d906551edd5fcf0f8dced176de105a2774",
+      "size": 7308
+    },
+    {
+      "path": "worker/af_common_cut_compare.py",
+      "sha256": "cb4316b97ec072c247c1e3bff949977eebfea38962a7880c206fbfeed1ec2234",
+      "size": 8856
+    },
+    {
+      "path": "worker/af_compare.py",
+      "sha256": "3f7d550a18760b73ec545fed4e400eb91951d2583a25dbf306799d5b2b3277d1",
+      "size": 5655
+    },
+    {
+      "path": "worker/af_core.py",
+      "sha256": "6c322c65c902f60998639f68b2c5bae8943e8e6a2d4be54019ee43701e14dad4",
+      "size": 18791
+    },
+    {
+      "path": "worker/af_dual_baffles.py",
+      "sha256": "6b9910c1afe526dc93ec93e9b6c0af6dd25755039a094e3e61b50f5fb2cb3c66",
+      "size": 4087
+    },
+    {
+      "path": "worker/af_flow_diagnostics.py",
+      "sha256": "5b0285c6302a9bf5520605045e9f29c0cdd58bda577ba634cf51e85ce64b8d2c",
+      "size": 18777
+    },
+    {
+      "path": "worker/af_geometry_precheck.py",
+      "sha256": "fcd7cfe2f89a36312dcc09680de47314aea8f72701c3fcf55a36228c43ca1122",
+      "size": 9862
+    },
+    {
+      "path": "worker/af_geometry_scout.py",
+      "sha256": "ed0b4ce0870f9e7e53458456143798d63f9b22f1673d7e2add8e38975fcc971b",
+      "size": 8315
+    },
+    {
+      "path": "worker/af_h5_batch.py",
+      "sha256": "87e61353935205e985bdfb15e8565b64a478fa4213d69071cf01f903d046d688",
+      "size": 6293
+    },
+    {
+      "path": "worker/af_h5_offline.py",
+      "sha256": "826455256c87b60cdf2e2786f998d6f4681302d7eb11439be6c3316ee725363c",
+      "size": 36492
+    },
+    {
+      "path": "worker/af_h5_schema.py",
+      "sha256": "819e6a9f01ba220f6e8a8471dccffdfa28e0231cb0651d7ef1a8b2060617ba7e",
+      "size": 4153
+    },
+    {
+      "path": "worker/af_live_capture.py",
+      "sha256": "28e9e45eb06f622aaf82cbb204bef8180f8bba68481ef8f774203a8f73a35d53",
+      "size": 6880
+    },
+    {
+      "path": "worker/af_metrics.py",
+      "sha256": "34fd54d63c65d7872e011de9cb731fe1387cb2e9c1a1d4bcd2ba91a5bba24a04",
+      "size": 4289
+    },
+    {
+      "path": "worker/af_model_config.py",
+      "sha256": "8f01874f4b7047bdbe8ee52a326b8205f1527874c9046ae8de565d982af048d5",
+      "size": 8525
+    },
+    {
+      "path": "worker/af_native_11_9_reference.py",
+      "sha256": "fa1c14b128b2c8730a408e3153dc7c201de16c299897709e3187cee4704345b1",
+      "size": 18071
+    },
+    {
+      "path": "worker/af_native_flux_map.py",
+      "sha256": "a99029b846910f8a251fe2e71cf89c28048231462f374f17e80ffdf3516f5288",
+      "size": 6917
+    },
+    {
+      "path": "worker/af_native_profile.py",
+      "sha256": "0f6ec07b92364e59dc75fc2163a6676df4428c0ba4311a4979e3ff02a6b30a4f",
+      "size": 17734
+    },
+    {
+      "path": "worker/af_pairing.py",
+      "sha256": "b2218b9a3c4c2d774fcaa83eb4f090a9a27c217641e309af84046b5a774d21be",
+      "size": 3993
+    },
+    {
+      "path": "worker/af_port_only.py",
+      "sha256": "2f7e2fd57d18d48fb6517d350a96721915d1eff8d6fdef1a236359c5575f6fd7",
+      "size": 9222
+    },
+    {
+      "path": "worker/af_progress.py",
+      "sha256": "b9b80044e441e11712763640c0419eda2c8715622f8ca95aedc1baccb00f2ae6",
+      "size": 2831
+    },
+    {
+      "path": "worker/af_render_saved.py",
+      "sha256": "3a3e5d1e4d6b8bf338a9b4f3df40edb1e52e7421554dab096635f280243a0b69",
+      "size": 2239
+    },
+    {
+      "path": "worker/af_report_library.py",
+      "sha256": "9616d72b134efa7658912070e1116bc699b6a056f5266fb970c44a18cf97eaf1",
+      "size": 7243
+    },
+    {
+      "path": "worker/af_report_summary.py",
+      "sha256": "a1bf0dd5f11d23b7dcb6270ad4c4f3f9a39b5b74c1fa6bedb66b6c055671c9c0",
+      "size": 12841
+    },
+    {
+      "path": "worker/af_report_v11.py",
+      "sha256": "8f80684dbce1be181a5d7762f8c735762680765b5faadd5d178c335738de1652",
+      "size": 20853
+    },
+    {
+      "path": "worker/af_report_v3.py",
+      "sha256": "0e9675bdf3b26b54c4fa1f1931fd59e289e5baff26bc57fdd171af340beff8dd",
+      "size": 56163
+    },
+    {
+      "path": "worker/af_rt0.py",
+      "sha256": "d4f08ca4cb358ae25f297aab0c776aab71e1d214eb7666d810b9bd4e7bedc9ad",
+      "size": 5117
+    },
+    {
+      "path": "worker/af_saved_analysis.py",
+      "sha256": "6cb254ff91445376f840001567394dec040dd0b793ef20bbb31ccc25d5d83bf3",
+      "size": 13050
+    },
+    {
+      "path": "worker/af_saved_compare.py",
+      "sha256": "3a000b9973398dfff543607eb7f0350965ec0c61d770fc176a0aae974d5260bb",
+      "size": 2388
+    },
+    {
+      "path": "worker/af_set_compare.py",
+      "sha256": "b8e2631cf95f28702cde95f26aa31efcdba33de749c3208ad9d1f5e3896e42c2",
+      "size": 7169
+    },
+    {
+      "path": "worker/af_species_exposure.py",
+      "sha256": "986050100ea9a7d95952d0044216d09e559cbc7ee38870805eca208948245214",
+      "size": 15200
+    },
+    {
+      "path": "worker/af_species_report.py",
+      "sha256": "e907148b8b1c146a1a1b79194349ba0cfc5260644ba006ba43eaeae790433a7b",
+      "size": 18784
+    },
+    {
+      "path": "worker/af_target_lock.py",
+      "sha256": "ce649823c1d3df42a0bc4e92ccd642fd09b615a0c40eefa10c043aa8d40f768e",
+      "size": 1872
+    },
+    {
+      "path": "worker/af_wafer_patches.py",
+      "sha256": "ef7230d275dba8686fe2bc6a367f52661c153d6b35e90ca1eddd4426b73a92e7",
+      "size": 26628
+    },
+    {
+      "path": "worker/af_wall_reaction.py",
+      "sha256": "4376a565a4422abc82159b41e5f24015684bcdd5cc5f84fbe8ed0dc9ce46bf58",
+      "size": 29768
+    },
+    {
+      "path": "worker/af_wb_bootstrap.py",
+      "sha256": "d2bdb113794ecba33542a90afac6ae2770107eb812f8933aa1e059c774af720e",
+      "size": 1904
+    },
+    {
+      "path": "worker/af_wb_bridge.py",
+      "sha256": "15d5e6cf4188c5f02f5ddd57d8dca92cd903188678e5583b2975af9032467e15",
+      "size": 27069
+    },
+    {
+      "path": "worker/af_wb_conditions.py",
+      "sha256": "4a64900a9b36ad96de82f0f91e53d77c915f2e26f9bf4d9751b498edbbbcfbc6",
+      "size": 13304
+    },
+    {
+      "path": "worker/af_wb_files.py",
+      "sha256": "e29e442829790f13af28d81a2b5d40023c445c2152fa8caaac12aae252a79b0f",
+      "size": 2227
+    },
+    {
+      "path": "worker/af_wb_solver.py",
+      "sha256": "5e72994bbd28ec4f17489e964ce10d1c8fb42dead028af6dc9effb3b0e6bea10",
+      "size": 13611
+    },
+    {
+      "path": "worker/af_worker.py",
+      "sha256": "5f9b0e5666ccd7f9d9bd99cff3c03399a2a546165ba504e85c05b582315e91e8",
+      "size": 3293
+    },
+    {
+      "path": "worker/am_workbench_bridge.py",
+      "sha256": "5c405403ccd70684e8f7d92e9abad1b5b8fd7629c1b73e01e6f4cd5480af3c44",
+      "size": 5562
+    }
+  ],
   "compiled_archive_inventory": [],
   "source_note": "Original readable files only; compiled code is not original source."
 }

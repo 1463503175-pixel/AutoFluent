@@ -6,6 +6,9 @@ loopback-only port discovery, authenticated session validation, unique-system
 selection, explicit TUI read-only probe. No Workbench/Fluent launch, init, or
 case mutation. A WB bridge alone is NOT the PyFluent case/data read-back API.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import argparse
 import csv
 import io
@@ -283,13 +286,14 @@ def validate_ports(candidates):
 
 
 def export_existing_fluent_settings(wb, systems, selection, output_dir):
-    """Export actual user-modified settings using official Fluent v242 TUI.
+    """Export actual saved settings using official Fluent v242 TUI.
 
     Creates one uniquely named small file OUTSIDE the case, never reads case/data,
     never initializes/iterates, never repeats a SendCommand on ambiguous return.
     This export does NOT capture default settings or independently validate a case.
     """
     import hashlib
+    from af_wb_files import transport_file,publish_export
     from datetime import datetime
     matches=[x for x in systems if x.get('name')==selection and x.get('fluent')]
     if len(matches)!=1: raise RuntimeError('需要唯一的 Fluent 系统，禁止猜测目标')
@@ -299,13 +303,14 @@ def export_existing_fluent_settings(wb, systems, selection, output_dir):
     outdir=Path(output_dir).expanduser().resolve()
     if not outdir.is_absolute(): raise ValueError('导出目录必须是绝对路径')
     outdir.mkdir(parents=True,exist_ok=True)
-    file=outdir/('fluent_settings_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:10]+'.set')
+    file=outdir/('工况设置_'+datetime.now().strftime('%Y%m%d_%H%M%S')+'_'+uuid.uuid4().hex[:10]+'.set')
     if file.exists(): raise RuntimeError('不能覆盖已有设置文件')
     name=json.dumps(target['name'],ensure_ascii=True)
     cn=json.dumps(container)
     # TUI uses forward slashes on Windows; quote the path as a TUI argument.
-    command='/file/write-settings "%s"' % str(file).replace('\\','/')
-    script=('target=None\n'
+    transport=transport_file(file)
+    command='/file/write-settings "%s"' % str(transport).replace('\\','/')
+    script=('import json\ntarget=None\n'
             'for _s in GetAllSystems():\n'
             '    if str(_s.Name)==%s:\n' % name+
             '        if target is not None: raise Exception("Duplicate system")\n'
@@ -313,25 +318,26 @@ def export_existing_fluent_settings(wb, systems, selection, output_dir):
             'if target is None: raise Exception("Target system missing")\n'
             'c=target.GetContainer(ComponentName=%s)\n' % cn+
             'if c is None: raise Exception("Fluent editor container missing")\n'
-            'c.SendCommand(Command=%s)\n' % json.dumps(command,ensure_ascii=True)+
-            'wb_script_result="AUTOFLUENT_SETTINGS_COMMAND_SUBMITTED"\n')
+            'c.SendCommand(Command=u%s)\n' % json.dumps(command,ensure_ascii=True)+
+            'wb_script_result=json.dumps("AUTOFLUENT_SETTINGS_COMMAND_SUBMITTED")\n')
     raw=wb.run_script_string(script)  # exactly once, even if return None
     # The created file, NOT a Workbench return value, proves an actual export.
     # Some solver filesystem integrations return before the file is flushed.
     import time
     for _ in range(12):
-        if file.is_file() and file.stat().st_size>=32:break
+        if transport.is_file() and transport.stat().st_size>=32:break
         time.sleep(.25)
-    if not file.is_file() or file.stat().st_size<32:
+    if not transport.is_file() or transport.stat().st_size<32:
         return {'status':'settings_unconfirmed','system':selection,
                 'detail':'Workbench 可能已收到指令，但未发现 Fluent 生成的设置文件；不得重发或视为成功'}
+    publish_export(transport,file)
     raw_bytes=file.read_bytes()
     return {'status':'settings_exported','system':selection,
             'file':str(file),'bytes':len(raw_bytes),
             'sha256':hashlib.sha256(raw_bytes).hexdigest(),
-            'scope':'user-modified-settings-only; excludes solver defaults, mesh and field data',
+            'scope':'settings-file-content; excludes mesh and field data; zone mapping requires independent review',
             'verified_provenance':'settings_file_written_by_running_fluent',
-            'detail':'已从当前 Fluent 导出文件；不代表所有设置或求解结果完成一致性验证'}
+            'detail':'已从当前 Fluent 导出并校验设置文件；不包含网格和场数据'}
 
 
 def safe_probe(wb,systems,selection=None):
@@ -350,7 +356,7 @@ def safe_probe(wb,systems,selection=None):
     # Fluent Setup.SendCommand should fail if editor is not open. We neither
     # invoke Edit() nor create Fluent. Persist a unique receipt *after* the
     # TUI report. When Workbench returns None, never resubmit that command.
-    script=('target=None\n'
+    script=('import json\ntarget=None\n'
             'for s in GetAllSystems():\n'
             '    if str(s.Name)==%s:\n' % n+
             '        if target is not None: raise Exception("Duplicate system")\n'
@@ -361,9 +367,13 @@ def safe_probe(wb,systems,selection=None):
             'c.SendCommand(Command="/report/summary")\n'
             'with open(u%s,"w") as r:\n' % path_literal+
             '    r.write("AUTOFLUENT_TUI_REPORT_SUBMITTED")\n'
-            'wb_script_result="AUTOFLUENT_TUI_REPORT_SUBMITTED"\n')
+            'wb_script_result=json.dumps("AUTOFLUENT_TUI_REPORT_SUBMITTED")\n')
     try:
-        raw=wb.run_script_string(script)
+        try:
+            raw=wb.run_script_string(script)
+        except (ValueError,TypeError):
+            if not receipt.is_file():raise
+            raw=None
         try: value=_loads(raw)
         except (ValueError,TypeError): value=None
         if value!='AUTOFLUENT_TUI_REPORT_SUBMITTED' and receipt.is_file():

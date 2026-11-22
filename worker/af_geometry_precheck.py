@@ -5,6 +5,9 @@ Runs the same connected-patch wafer recognizer as the physical engine, but
 streams wall-zone face/node connectivity and never allocates an all-faces map.
 A valid config is not itself a valid geometry preflight.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from pathlib import Path
 import json
 

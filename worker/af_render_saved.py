@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 """Regenerate an offline report from stored physical JSON without H5 rereads."""
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import argparse
 import json
 from pathlib import Path

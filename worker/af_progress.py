@@ -5,6 +5,9 @@ Percent denotes completed *weighted processing stages*, not elapsed-time ETA.
 No fake throughput or background success is inferred from this file.
 """
 from __future__ import annotations
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import json
 import os
 from pathlib import Path

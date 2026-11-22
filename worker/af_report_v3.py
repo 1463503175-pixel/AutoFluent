@@ -7,6 +7,9 @@ baffle, pressure, trust, comparison, next steps, expandable provenance.
 Numbers are drawn exclusively from an analysis result. No cached example values.
 """
 from __future__ import annotations
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from html import escape
 import json
 import math
@@ -218,6 +221,22 @@ def _baffle_row_histogram(baffle):
     return '<svg class="chart" viewBox="0 0 860 284" role="img" aria-label="底部挡板各排净流量柱图">'+''.join(lines)+f'<text x="60" y="274" style="font-size:14px">虚线：{reference_note}　橙色：高于参考值</text></svg>'
 
 
+def _segment_pressure_chart(segments):
+    values=[(s['name'],s.get('drop_pa')) for s in segments
+            if isinstance(s.get('drop_pa'),(int,float)) and math.isfinite(s['drop_pa'])]
+    if not values:
+        return ''
+    extent=max(abs(v) for _,v in values) or 1.
+    origin=445 if any(v<0 for _,v in values) else 205
+    scale=(225 if origin==445 else 460)/extent
+    elements=[]
+    for i,(name,value) in enumerate(values):
+        y=34+40*i
+        end=origin+value*scale
+        elements.append(f'<text x="12" y="{y+4}">{_e(name)}</text><rect x="{min(origin,end):.1f}" y="{y-13}" width="{abs(end-origin):.1f}" height="22" fill="#087e8b"/><text x="690" y="{y+4}">{value:.5f} Pa</text>')
+    return f'<svg class="chart" viewBox="0 0 800 {len(values)*40+22}" role="img" aria-label="分段静压差，以上游减下游计算"><path d="M{origin} 14V{len(values)*40+6}" stroke="#536b77"/>{"".join(elements)}</svg>'
+
+
 def _plenum_pressure_svg(baffle, port=None):
     info=baffle.get('lower_plenum_static_pressure_pa') or {}
     cells=info.get('xz_bins') or []
@@ -250,7 +269,7 @@ def _section(name,body):
     return '<section><h2>'+_e(name)+'</h2>'+body+'</section>'
 
 
-def render_native_report(metrics, *, synthetic_demo=False):
+def _render_evidence_report(metrics, *, synthetic_demo=False):
     if metrics.get('schema')!='autofluent.adaptive_native.v1':
         raise ValueError('Expected a structured adaptive-native analysis result; refuse mixed report input')
     provenance=metrics.get('provenance') or {}
@@ -394,8 +413,9 @@ def render_native_report(metrics, *, synthetic_demo=False):
         p_text += '<p class="small">该测站仅为真实单元中心静压的算术样本；非体积加权、非原生截面总压，不用于自动认定端口总压降。</p>'
     segments=pressure.get('segment_static_drop_pa') or []
     if segments:
-        p_text+='<h3>分段静压差</h3>'+_table(['区段','上游减下游 (Pa)'],
+        p_text+='<h3>哪一段压力变化最大？</h3>'+_segment_pressure_chart(segments)+_table(['区段','上游减下游 (Pa)'],
             [[s['name'],_fmt(s.get('drop_pa'),7)] for s in segments])
+        p_text+='<p>正值表示下游静压较低，负值表示下游静压较高。这里比较各段测站的静压，入口到出口的总压降另列。</p>'
     elif not pressure.get('stations'):
         p_text+='<p class="notavailable">分段静压未取得：'+_e(pressure.get('station_reason','未记录可核验的测站。'))+'</p>'
     body.append(_section('4. 压力与压降',p_text))
@@ -437,6 +457,23 @@ def render_native_report(metrics, *, synthetic_demo=False):
         '请在「模型对比」中使用共同截面复算。先核对上表的 Y 高度、排间分界和通道对应关系，再比较片间占比与 CV。'
         '端口压降另按边界范围、工况及压力定义核对。</div>'))
     tasks=[]
+    hole_rows=baffle.get('rows') or []
+    if (baffle.get('status')=='geometry_candidate_holes_native_flux_computed' and hole_rows
+            and all(isinstance(r.get('net_kg_s'),(int,float)) and r.get('hole_count',0)>0 for r in hole_rows)):
+        total=sum(r['net_kg_s'] for r in hole_rows)
+        count=sum(r['hole_count'] for r in hole_rows)
+        if total>0:
+            peak=max(hole_rows,key=lambda r:r['net_kg_s']/total-r['hole_count']/count)
+            share=100*peak['net_kg_s']/total
+            reference=100*peak['hole_count']/count
+            if share-reference>1e-8:
+                tasks.append(['优先核查底部流量集中',
+                              f'底部挡板第 {peak["index"]} 排 · 对照孔位图及出口投影',
+                              f'该排占挡板净流量 {share:.2f}%，按孔数均分时约 {reference:.2f}%；孔间 CV {_fmt(baffle.get("all_hole_cv_pct"))}%。',
+                              '先对照逐孔流量和集气腔静压图，检查高流量孔是否靠近低压区或出口。单份解无法确认结构因果。',
+                              '若高流量与出口低压集中对应，下一轮可只改变集气腔净深；否则先确认孔口和局部流路。',
+                              '固定挡板孔径及孔位、晶圆排布、进出口工况、统计截面和网格策略。',
+                              f'对照孔间 CV、该排占比 {share:.2f}%、下层最低通道流量和总压降；压降允许变化由试验前确定。'])
     for lname,layer in layers.items():
         channels=layer.get('channels') or []
         if not channels:continue
@@ -473,6 +510,9 @@ def render_native_report(metrics, *, synthetic_demo=False):
         'geometry':metrics.get('geometry'),
         'pressure_status':pressure.get('status'),
         'baffle_status':baffle.get('status')},ensure_ascii=False,indent=2,default=str))+'</pre></details>'
+    if metrics.get('flow_diagnostics'):
+        from af_flow_diagnostics import render_diagnostics_html
+        body.append(_section('偏流与分段总压定位',render_diagnostics_html(metrics['flow_diagnostics'])))
     body.append(_section('8. 来源与完整明细',detail))
     return ('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -714,3 +754,9 @@ def render_inspection_report(result):
             '<title>'+_e(model)+' · H5 读取诊断</title><style>'+STYLE+'</style></head><body><main>'+
             header+summary+''.join(sections)+
             '<div class="foot">AutoFluent 保存解只读报告 · 所有样式和数据均内嵌</div></main></body></html>')
+
+
+def render_native_report(metrics, *, synthetic_demo=False):
+    evidence = _render_evidence_report(metrics, synthetic_demo=synthetic_demo)
+    from af_report_v11 import render_enhanced_report
+    return render_enhanced_report(metrics, evidence, synthetic_demo=synthetic_demo)

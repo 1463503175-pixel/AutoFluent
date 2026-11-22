@@ -5,6 +5,9 @@ A matching list of named channels is not proof of geometry equivalence. Never
 promote this to a qualified physical comparison without independent validation.
 """
 
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
+
 def compare_saved_results(a,b):
     expected='autofluent.offline_case_data.v1'
     if a.get('schema')!=expected or b.get('schema')!=expected:

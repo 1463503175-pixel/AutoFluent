@@ -5,6 +5,9 @@ Uses *actual* native SV_FLUX only on explicitly saved, named measurement
 surfaces. Without interior wafer-gap surfaces it refuses to invent their fluxes.
 The generic tetrahedral geometry-to-measurement-surface adapter remains separate.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import html
 import json
 import os

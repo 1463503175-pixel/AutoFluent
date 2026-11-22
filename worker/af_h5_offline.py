@@ -7,6 +7,9 @@ supported offline reader; optionally calculates per-zone original face flux
 when that variable is present. This is NOT a wafer-gap RT0 solver. Never
 silently substitute interpolated velocity for a conservative face flux.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import argparse
 import hashlib
 import html

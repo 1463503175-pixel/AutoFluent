@@ -1,3 +1,6 @@
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from pathlib import Path
 import argparse
 import csv

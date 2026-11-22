@@ -6,6 +6,9 @@ repeated face ID invalidates the *entire* native global map. This is read-only
 and returns a small summary, not huge field arrays to the Win32 GUI.
 """
 
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
+
 import math
 from pathlib import Path
 

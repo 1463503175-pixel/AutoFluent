@@ -6,6 +6,9 @@ The connect_existing, read_only_probe, list_systems, and their dependencies
 below are copied from the AM source. Meshing-specific dispatch_job is excluded:
 AutoFluent must not execute Meshing ACT actions.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import json
 import re
 import os

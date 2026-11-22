@@ -10,6 +10,9 @@ invokes it in the SAME process (so UI cancellation does not orphan a child
 reader), checks its outputs, and emits machine-readable metrics.  A rejected
 geometry is a calibration request, never a zero-valued analysis.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import contextlib
 import csv
 import hashlib

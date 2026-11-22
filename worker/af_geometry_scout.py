@@ -5,6 +5,9 @@ This is not wafer classification. It finds repeated large, axis-aligned wall
 stations that a model-specific geometry profile can later validate. It does
 not assign any face flux to wafer/bypass regions or calculate a CV.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from collections import defaultdict
 import hashlib
 import json

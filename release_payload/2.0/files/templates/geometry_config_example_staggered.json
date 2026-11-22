@@ -1,0 +1,28 @@
+{
+  "schema": "autofluent.geometry_config.v1",
+  "units": "m",
+  "axis": {"wafer_normal": "x", "flow": "y", "row": "z", "flow_sign": "negative"},
+  "ports": {"inlet_zones": ["inlet"], "outlet_zones": ["outlet"]},
+  "wafer": {
+    "arrangement": "staggered",
+    "thickness_range_m": [0.008, 0.010],
+    "regular_gap_range_m": [0.068, 0.078]
+  },
+  "layers": [
+    {"id": "lower", "y_range_m": [-0.45, -0.32], "cut_y_m": -0.385,
+     "rows": [
+       {"id": "low_z", "z_range_m": [-0.301, -0.179]},
+       {"id": "high_z", "z_range_m": [-0.021, 0.101]}
+     ]},
+    {"id": "upper", "y_range_m": [-0.22, -0.09], "cut_y_m": -0.155,
+     "rows": [
+       {"id": "low_z", "z_range_m": [-0.301, -0.179]},
+       {"id": "high_z", "z_range_m": [-0.021, 0.101]}
+     ]}
+  ],
+  "partition": {"central_bypass": "auto"},
+  "expected": {"wafer_count": 32, "channel_count": 24, "baffle_hole_count": null},
+  "resources": {"memory_budget_mb": 6144},
+  "measurement": {"pressure_stations": []},
+  "_note": "Synthetic test configuration ONLY. Do not use as coordinates or expected counts for real ALD hardware."
+}

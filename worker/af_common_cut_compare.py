@@ -4,6 +4,9 @@
 This is a real recalculation, not subtraction of mismatched prior reports.
 Unverified boundary conditions/convergence keep all conclusions provisional.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import argparse
 from html import escape
 import json

@@ -5,6 +5,9 @@ This computes actual native Face-ID SV_FLUX boundary sums without allocating
 triangles, c0/c1 cell centroids or any full-mesh result arrays. It is never
 reported as proof of convergence or wafer-area measurement.
 """
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 from pathlib import Path
 import re
 

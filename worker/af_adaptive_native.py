@@ -13,6 +13,9 @@ four-face cells is supported at present. A successful calculation is *not* proof
 of convergence, nor of validity for arbitrarily rotated/multiphase reactors.
 """
 from __future__ import annotations
+
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
 import csv
 import hashlib
 import os
@@ -406,7 +409,14 @@ def _read_cff(case,data, *, memory_budget_mb=6144):
         flux,flux_ranges=_read_native_full_flux(fields,nf)
         progress(59,'边界区与壁面','审核端口、壁面是否误包含内部面')
         zones=_face_zones(mesh,nf)
-        walls=[np.arange(a,b,dtype=np.int64) for name,a,b in zones if 'wall' in name.lower() or '壁' in name]
+        types=mesh.get('faces/zoneTopology/zoneType')
+        if types is not None:
+            kinds=np.asarray(types[:]).reshape(-1)
+            if len(kinds)!=len(zones):
+                raise UnsupportedCFF('Face-zone type/range mismatch')
+            walls=[np.arange(a,b,dtype=np.int64) for (_,a,b),kind in zip(zones,kinds) if kind==3]
+        else:
+            walls=[np.arange(a,b,dtype=np.int64) for name,a,b in zones if 'wall' in name.lower() or '壁' in name]
         fallback=False
         if not walls:
             start=int(inside.min())
@@ -670,6 +680,7 @@ def _connected_boundary_ports(mesh, face_ids, kind, *, max_faces=300000):
         v=sign*flux[ids]
         center=np.mean(mesh['xyz'][conn[local]].mean(axis=1),axis=0)
         ports.append({'face_count':len(local),'center_m':center.tolist(),
+                      'bounds_m':[mesh['xyz'][conn[local]].reshape(-1,3).min(axis=0).tolist(),mesh['xyz'][conn[local]].reshape(-1,3).max(axis=0).tolist()],
                       'net_kg_s':float(v.sum(dtype=np.float64)),
                       'positive_kg_s':float(v[v>0].sum(dtype=np.float64)),
                       'negative_magnitude_kg_s':float(-v[v<0].sum(dtype=np.float64))})
@@ -908,6 +919,10 @@ def analyze_saved_pair(case_path,data_path, *, config=None):
             baffle=_baffle_plenum_candidates(mesh,centers,df,config=config)
         except (UnsupportedCFF,GeometryAmbiguous,ValueError,IndexError,KeyError,TypeError,MemoryError) as exc:
             baffle={'status':'not_identified','reason':str(exc)[:350]}
+        from af_dual_baffles import compute_dual_baffles, read_pressure_reference, spatial_context
+        baffles=compute_dual_baffles(mesh,centers,df,baffle,ports,config)
+        pressure['reference']=read_pressure_reference(cf)
+        spatial=spatial_context(mesh,ports)
         pressure['stations']=_configured_pressure_stations(mesh,centers,df,config)
         if not pressure['stations']:
             diag=baffle.get('diagnostics') or {}
@@ -996,6 +1011,8 @@ def analyze_saved_pair(case_path,data_path, *, config=None):
                     'partition_net_kg_s':result['parts_net_kg_s'],
                     'whole_cut_net_kg_s':result['whole_cut_kg_s'],
                     'partition_directional_kg_s':result['parts_directional_kg_s'],
+                    'six_regions_directional_kg_s':result['six_regions_directional_kg_s'],
+                    'six_region_geometry':result['six_region_geometry'],
                     'bypass_directional_kg_s':result['bypass_directional_kg_s'],
                     'channels':result['channels'],
                     'central_x_wide_gap_kg_s':result['central_x_wide_gap_kg_s'],
@@ -1015,6 +1032,29 @@ def analyze_saved_pair(case_path,data_path, *, config=None):
             modules['wafer_geometry' if stage=='wafer_wall_pairing' else 'wafer_partition_and_bypass']={
                 'status':'blocked','stage':geometry_error['stage'],
                 'reason':geometry_error['reason'],'diagnostics':geometry_error['diagnostics']}
+        flow_diagnostics={}
+        if geometry_error is None:
+            try:
+                from af_flow_diagnostics import analyze_flow_diagnostics
+                flow_diagnostics=analyze_flow_diagnostics(mesh,centers,df,geometry,layers,ports,pressure,baffle)
+            except (ValueError,KeyError,IndexError,TypeError,RuntimeError,MemoryError,OSError) as exc:
+                flow_diagnostics={'status':'not_available','reason':str(exc)[:350]}
+            modules['flow_diagnostics']={'status':'completed' if flow_diagnostics.get('status')=='computed_candidate' else 'partial',
+                                        'reason':flow_diagnostics.get('reason','')}
+        from af_species_exposure import analyze_species
+        try:
+            progress(90,'混合气体组分与暴露证据','按当前混合物真实顺序统计全部组分；不以浓度代替饱和剂量')
+            species_exposure=analyze_species(cf,df,mesh,centers,geometry,layers,inlets)
+        except (ValueError,KeyError,IndexError,TypeError,RuntimeError,MemoryError,OSError) as exc:
+            species_exposure={'status':'not_available','reason':str(exc)[:500]}
+        from af_wall_reaction import wall_reaction
+        try:
+            inlet=species_exposure.get('inlet_mass_fractions') or {}
+            water=bool(inlet.get('h2o',0)>1e-8 and inlet.get('alme3',0)<=1e-8)
+            wall_reaction_result=wall_reaction(cf,df,mesh,geometry,water=water)
+        except (ValueError, KeyError, IndexError, TypeError, RuntimeError, MemoryError, OSError) as exc:
+            wall_reaction_result={'status':'not_available','reason':str(exc)[:500]}
+        modules['species_exposure']={'status':species_exposure['status'],'reason':species_exposure.get('reason','')}
         if before_case!=file_identity(case) or before_data!=file_identity(data):
             raise UnsupportedCFF('Case/Data was replaced or modified while reading; retry only after Fluent has finished saving')
         if geometry_error is not None:
@@ -1025,8 +1065,8 @@ def analyze_saved_pair(case_path,data_path, *, config=None):
                                   'mesh_faces':mesh['nf'],'mesh_tetra_cells':mesh['nc'],
                                   'config_mode':'explicit_geometry_review' if config else 'automatic_geometry_review',
                                   'input_files_unchanged_during_analysis':True},
-                    'port_flux':ports,'pressure':pressure,'baffle':baffle,
-                    'geometry':geometry,'layers':layers,'modules':modules,
+                    'port_flux':ports,'pressure':pressure,'baffle':baffle,'baffles':baffles,'spatial_context':spatial,
+                    'geometry':geometry,'layers':layers,'modules':modules,'species_exposure':species_exposure,'wall_reaction':wall_reaction_result,
                     'metric_modules':_module_result_envelopes(modules,ports,pressure,baffle,geometry,layers),
                     'first_full_analysis_blocker':geometry_error,
                     'checks':{'global_port_mass_imbalance_pct':ports['mass_imbalance_pct'],
@@ -1057,11 +1097,12 @@ def analyze_saved_pair(case_path,data_path, *, config=None):
                               'case_data_identity_evidence':'Data settings/Case File basename + compatible face-index coverage only; not a cryptographic shared-mesh fingerprint',
                               'case_data_pair_independently_verified':False,
                               'input_files_unchanged_during_analysis':True},
-                'geometry':geometry, 'port_flux':ports,'layers':layers,
+                'geometry':geometry, 'port_flux':ports,'layers':layers,'species_exposure':species_exposure,'wall_reaction':wall_reaction_result,
+                'flow_diagnostics':flow_diagnostics,
                 'modules':modules,
                 'metric_modules':_module_result_envelopes(modules,ports,pressure,baffle,geometry,layers),
                 'tetra_topology_spotcheck':tetra_evidence,
-                'pressure':pressure,'baffle':baffle,
+                'pressure':pressure,'baffle':baffle,'baffles':baffles,'spatial_context':spatial,
                 'checks':{'global_port_mass_imbalance_pct':ports['mass_imbalance_pct'],
                           'cut_partition_closure':'checked on each layer',
                           'all_external_boundary_faces':'audited; significant unclassified flux rejects result',
@@ -1265,7 +1306,7 @@ def _baffle_outlet_y(mesh, config=None):
     return float(np.mean(values)) if values else None
 
 
-def _baffle_plenum_candidates(mesh,centroids,df,config=None):
+def _baffle_plenum_candidates(mesh,centroids,df,config=None, *, include_plenum=True):
     """Physical plate openings first, native staircase cut pieces second.
 
     Neither the count of disconnected cut pieces nor expected_hole_count
@@ -1416,6 +1457,7 @@ def _baffle_plenum_candidates(mesh,centroids,df,config=None):
     data={'status':'hole_outline_unverified','reason':opening_reason,
           'floor_y_m':floor,'baffle_lower_y_m':low,'baffle_upper_y_m':high,
           'cut_height_m':cut,'whole_cut_net_kg_s':full_flux,
+          'outer_outline_xz_m':[r['outline_xz_m'] for r in face_a.get('outers',[])],
           'candidate_integral_component_count':len(fragments),
           'diagnostics':diagnostics}
     if opening_pair_ok:
@@ -1456,6 +1498,7 @@ def _baffle_plenum_candidates(mesh,centroids,df,config=None):
                          'all_hole_cv_pct':float(net.std()/abs(mean)*100) if abs(mean)>1e-30 else None,
                          'verification':'matched physical closed aperture loops on both plate walls to native flux pieces'})
         else:data['reason']='One or more integral pieces cannot be assigned to exactly one physical aperture; no certified hole CV'
+    if not include_plenum:return data
     # A valid pressure sample can be independent of failed aperture matching.
     try:
         cell_data=df.get('results/%s/%s/cells/SV_P'%(mesh['result_group'],mesh['phase_group']))

@@ -8,6 +8,9 @@ No guessed coordinates, face IDs, or old-model geometry are substituted.
 """
 from __future__ import annotations
 
+import sys as _af_sys
+_af_sys.dont_write_bytecode = True  # Keep the verified engine cache immutable.
+
 import math
 from pathlib import Path
 
