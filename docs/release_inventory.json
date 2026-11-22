@@ -11,7 +11,7 @@
   "archive_scopes": [
     {
       "archive": "zip@3522368",
-      "project_file_count": 58,
+      "project_file_count": 60,
       "candidate_paths": [
         "assets/AutoFluent.ico",
         "assets/AutoFluent_icon_512.png",
@@ -24,6 +24,7 @@
         "worker/af_adaptive_compare.py",
         "worker/af_adaptive_geometry.py",
         "worker/af_adaptive_native.py",
+        "worker/af_ald_stages.js",
         "worker/af_baffle_openings.py",
         "worker/af_bundle_diagnostics_selftest.py",
         "worker/af_bundle_selftest.py",
@@ -62,6 +63,7 @@
         "worker/af_species_exposure.py",
         "worker/af_species_report.py",
         "worker/af_target_lock.py",
+        "worker/af_wafer_heat.js",
         "worker/af_wafer_patches.py",
         "worker/af_wall_reaction.py",
         "worker/af_wb_bootstrap.py",
@@ -134,6 +136,11 @@
       "path": "worker/af_adaptive_native.py",
       "sha256": "342c6862ca243fe2ae0f528117264d55e4a318da915683ec9a7bf9ceeeef0184",
       "size": 88357
+    },
+    {
+      "path": "worker/af_ald_stages.js",
+      "sha256": "c5a1bb1ce67e911974a156a52293cebcca875167da879973de3af59e33e0f734",
+      "size": 21137
     },
     {
       "path": "worker/af_baffle_openings.py",
@@ -326,6 +333,11 @@
       "size": 1872
     },
     {
+      "path": "worker/af_wafer_heat.js",
+      "sha256": "ffac524782c3c9b333b52477af52135c362f7624e3892b13bc31ea8d741bf30f",
+      "size": 2193
+    },
+    {
       "path": "worker/af_wafer_patches.py",
       "sha256": "ef7230d275dba8686fe2bc6a367f52661c153d6b35e90ca1eddd4426b73a92e7",
       "size": 26628
@@ -374,11 +386,20 @@
   "conflicts": [],
   "missing_worker_imports": [],
   "missing_report_assets": [],
+  "worker_literal_resource_references": [
+    "worker/af_ald_stages.js",
+    "worker/af_native_11_9_reference.py",
+    "worker/af_wafer_heat.js",
+    "worker/af_wb_bootstrap.py"
+  ],
+  "missing_worker_resources": [],
   "go_frontend_source_recovered": false,
   "comparison_to_previous_payload": {
     "added": [
       "templates/report_v11/report.css",
-      "templates/report_v11/report.js"
+      "templates/report_v11/report.js",
+      "worker/af_ald_stages.js",
+      "worker/af_wafer_heat.js"
     ],
     "removed": [],
     "changed": [
