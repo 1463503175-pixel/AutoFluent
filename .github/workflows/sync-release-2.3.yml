@@ -1,0 +1,36 @@
+name: Sync verified AutoFluent Release 2.3
+on:
+  push:
+    paths:
+      - '.github/workflows/sync-release-2.3.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: autofluent-release-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download pinned Release 2.3
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --max-time 180 'https://github.com/1463503175-pixel/AutoFluent/releases/download/2.3/AutoFluent.exe' --output "$RUNNER_TEMP/AutoFluent.exe"
+          echo 'ac77cdb1a8daff1a5d52e0a90ea135335c978c20a325e0e945461505de598c79  '"$RUNNER_TEMP/AutoFluent.exe" | sha256sum -c -
+      - name: Static recovery without running application
+        shell: bash
+        run: |
+          cp .github/prepare_release_23.py "$RUNNER_TEMP/prepare_release_23.py"
+          python3 "$RUNNER_TEMP/prepare_release_23.py" "$RUNNER_TEMP/AutoFluent.exe" --repo .
+          sha256sum -c SHA256SUMS.txt
+      - name: Commit latest repository, no legacy files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "release: sync AutoFluent 2.3 and remove stale application files"
+          git push origin HEAD:main
