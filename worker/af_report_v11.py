@@ -134,10 +134,14 @@ def render_enhanced_report(metrics, evidence, synthetic_demo=False):
                   '/*__AF_JS__*/':(root/'report.js').read_text(encoding='utf-8'),'/*__AF_DATA__*/':raw}
     import re
     template=re.sub(r'/\*__AF_(?:CSS|JS|DATA)__\*/',lambda m:replacements[m.group()],template)
-    body=re.search(r'<body[^>]*>(.*?)</body>',evidence,re.S)
-    original=body.group(1) if body else evidence
-    original=re.sub(r'^\s*<main[^>]*>|</main>\s*$', '', original)
-    archive='<details id="native-evidence" class="panel space-top"><summary>完整原生统计与偏流诊断</summary><div class="native-evidence">'+original+'</div></details>'
+    # Keep only diagnostics with no dedicated chart or CSV in the enhanced report.
+    unique_titles=('原生主分区正反向统计','中央 X/Z 子旁路正反向流量',
+                   '来源、限制与核验记录','晶圆识别逐阶段诊断',
+                   '挡板选板与孔轮廓诊断','来源和原生读取诊断','展开总压计算假设')
+    archive=''.join(
+        '<details class="panel space-top">'+block[len('<details>'):]
+        for block,title in re.findall(r'(<details><summary>(.*?)</summary>.*?</details>)',evidence,re.S)
+        if any(title.startswith(prefix) for prefix in unique_titles))
     template=template.replace('<section id="channels"',species_section+'<section id="channels"',1)
     return template.replace('<!--__AF_EVIDENCE__-->',archive,1)
 

@@ -297,6 +297,7 @@ def render_ald_stages(metrics):
     if not exposure:
         return ''
     snapshot={'provenance':metrics.get('provenance'),'wall_reaction':{k:v for k,v in (metrics.get('wall_reaction') or {}).items() if k not in ('heat','water_heat')}}
+    snapshot['inlet_flow_kg_s']=(metrics.get('port_flux') or {}).get('inlet_kg_s')
     snapshot['geometry']={'layers':[{'id':r['id']} for r in (metrics.get('geometry') or {}).get('layers',[])]}
     snapshot['species_exposure']={k:exposure.get(k) for k in ('channels','inlet_mass_fractions','flow_time_s','gas_inventory_kg','gas_inventory_stats')}
     raw=json.dumps(snapshot,ensure_ascii=False,allow_nan=False,separators=(',',':')).replace('<',chr(92)+'u003c')

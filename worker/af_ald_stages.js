@@ -187,10 +187,43 @@
    const link=document.createElement('a');link.href=url;link.download='AF_'+stageName+'_gas_inventory.csv';link.click();
    setTimeout(()=>URL.revokeObjectURL(url),1000);
  };
+ let history=null;
+ const refresh=[];
+ const picker=document.createElement('input');picker.type='file';picker.accept='.csv';
+ const historyStatus=document.createElement('small');historyStatus.setAttribute('role','status');
+ const inputsArea=document.createElement('details');
+ const caption=document.createElement('summary');caption.textContent='导入入口历史';
+ const guide=document.createElement('p');guide.textContent='CSV 表头：start_s,end_s,mass_flow_kg_s,tma_fraction,h2o_fraction。每行是一段恒定入口条件，使用各入口合计流量和流量加权质量分数，从 0 s 连续覆盖至保存时刻。';
+ inputsArea.append(caption,guide,picker,historyStatus);
+ root.prepend(inputsArea);
+ function integrateHistory(text,t){
+   const lines=text.replace(/^\uFEFF/,'').trim().split(/\r?\n/);
+   if(lines.shift()!=='start_s,end_s,mass_flow_kg_s,tma_fraction,h2o_fraction'||!Number.isFinite(t)||t<=0)throw Error('表头或保存时刻无效');
+   const totals={alme3:0,h2o:0};
+   let end=0;
+   for(const line of lines){
+     const cells=line.split(',').map(v=>v.trim());
+     if(cells.length!==5||cells.some(v=>v===''))throw Error('某行缺少入口数据');
+     const [start,stop,flow,tma,water]=cells.map(Number);
+     if(![start,stop,flow,tma,water].every(Number.isFinite)||Math.abs(start-end)>1e-8||stop<=start||flow<0||tma<0||water<0||tma+water>1+1e-9)throw Error('入口时段不连续或流量、组分无效');
+     const duration=Math.max(0,Math.min(stop,t)-start);
+     totals.alme3+=duration*flow*tma*1e6;totals.h2o+=duration*flow*water*1e6;
+     end=stop;
+   }
+   if(end<t-1e-8)throw Error('入口历史未覆盖到 '+t+' s');
+   return totals;
+ }
+ picker.onchange=async()=>{
+   const file=picker.files[0];if(!file)return;
+   try{history=integrateHistory(await file.text(),time(current));historyStatus.textContent='已导入 '+file.name;}
+   catch(e){history=null;historyStatus.textContent=e.message;}
+   refresh.forEach(update=>update());picker.value='';
+ };
  const frameTime=Number.isFinite(time(current))?time(current).toFixed(1)+' s':'流动时间未取得';
  const phaseLabel=recorded?.caption??(frameTime+(inferred===1?'｜纯 N₂，吹扫轮次待确认':''));
  const style=document.createElement('style');
- style.textContent='.af-use{box-sizing:border-box;margin:12px 0 18px;padding:14px;border:1px solid #dce6e9;border-radius:9px;background:#fff;font:14px/1.55 "Microsoft YaHei UI","Segoe UI",sans-serif}.af-use h3{font-size:20px;margin:0}.af-use p{margin:6px 0}.af-use details{margin-top:10px}.af-use label{display:inline-flex;flex-wrap:wrap;gap:6px;margin:4px 12px 4px 0}.af-use input{width:8em;max-width:100%}:is(#wall-reaction,#wall-reaction-water,#ald-stages) .af-use table{width:100%;min-width:0;table-layout:fixed;border-collapse:collapse}:is(#wall-reaction,#wall-reaction-water,#ald-stages) .af-use :is(th,td){white-space:normal;overflow-wrap:anywhere;text-align:left;padding:7px 8px;border-bottom:1px solid #e3eaed}:is(#wall-reaction,#wall-reaction-water,#ald-stages) .af-use :is(th,td):nth-child(2){text-align:right;font-variant-numeric:tabular-nums}.af-use col:first-child{width:34%}.af-use col:nth-child(2){width:24%}';
+ style.textContent='.af-use{box-sizing:border-box;margin:12px 0 18px;padding:14px;border:1px solid #dce6e9;border-radius:13px;background:#fff;font:inherit}.af-use h3{margin:0}.af-use .use-frame{color:var(--muted,#52717e);font-size:.87em}.af-use p{margin:6px 0}.af-use details{margin-top:10px}.af-use label{display:inline-flex;flex-wrap:wrap;gap:6px;margin:4px 12px 4px 0}.af-use input{width:8em;max-width:100%}:is(#wall-reaction,#wall-reaction-water,#ald-stages) .af-use table{width:100%;min-width:0;table-layout:fixed;border-collapse:collapse}:is(#wall-reaction,#wall-reaction-water,#ald-stages) .af-use :is(th,td){white-space:normal;overflow-wrap:anywhere;text-align:left;padding:7px 10px;border-bottom:1px solid #e3eaed}:is(#wall-reaction,#wall-reaction-water,#ald-stages) .af-use :is(th,td):nth-child(2){text-align:right;font-variant-numeric:tabular-nums}.af-use col:first-child{width:34%}.af-use col:nth-child(2){width:20%}';
+ style.textContent+='.af-material-chart{max-width:760px;margin:14px 0 16px}.material-bars{display:grid;grid-template-columns:minmax(0,11em) minmax(24px,1fr) auto;align-items:center;gap:9px 12px}.material-bars strong{font-variant-numeric:tabular-nums;text-align:right}.material-track{height:10px;border-radius:4px;background:#eef3f4;overflow:hidden}.material-track i{height:100%;display:block;background:#227d74;border-radius:4px}.material-track[data-kind=need] i{background:#a0b4ba}.material-track[data-kind=gas] i{background:#c57839}.material-share{display:flex;justify-content:space-between;gap:10px;margin-top:13px!important}.material-track.share{height:7px}.material-track.share i{background:#c57839}@media(max-width:600px){.material-bars{grid-template-columns:minmax(0,8em) minmax(12px,1fr) auto;gap:8px 6px;font-size:.88em}}';
  root.append(style);
  const el=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
  for(const [selector,target] of [['#wall-reaction > .wafer-map',1],['#wall-reaction-water > .wafer-map',3]]){
@@ -199,39 +232,81 @@
    const host=document.querySelector(water?'#wall-reaction-water':'#wall-reaction')||root;
    const gas=current.species_exposure||{};
    const kg=gas.gas_inventory_kg?.[key], stats=gas.gas_inventory_stats?.[key];
+   const flow=current.inlet_flow_kg_s;
+   const inlet=gas.inlet_mass_fractions?.[key];
    const mass=Number.isFinite(kg)?kg*1e6:null;
    const card=el('article');card.className='af-use';card.id=water?'h2o-material':'tma-material';
-   card.append(el('h3',(water?'H₂O':'TMA')+' 用料账'),el('p',phaseLabel));
+   const stamp=el('p',phaseLabel);stamp.className='use-frame';card.append(el('h3',(water?'H₂O':'TMA')+' 用料账'),stamp);
    const table=el('table'), cols=el('colgroup');cols.append(el('col'),el('col'),el('col'));table.append(cols);
    const notes=el('details');notes.append(el('summary','计算依据与补录'),el('p','气相残余按 ∫ρY dV。投料按恒定总流量 × 组分质量分数 × 时长。补录用于本次打开的报告。'));
+   // Read-only verification of the 0 s companion solution and reactive-area monitor for this exact saved frame.
+   const verifiedInitial={"data_path":"E:\\THING\\W.F\\YY\\FZMN\\MODEL\\11.20\\11.27\\5.0_files\\dp0\\FFF\\Fluent\\FFF-1-00017.dat.h5","case_path":"E:\\THING\\W.F\\YY\\FZMN\\MODEL\\11.20\\11.27\\5.0_files\\dp0\\FFF\\Fluent\\FFF-Setup-Output.cas.h5","data_bytes":2960732017,"data_modified_ns":1795766595658899600,"geometry_candidate_signature_not_mesh_hash":"6dbcacba1b7f0857e088aafbc12016b06109018991fb19902bc08761d876cfb1"};
+   const sameInitial=!water&&Object.entries(verifiedInitial).every(([k,v])=>current.provenance?.[k]===v);
+   const initialDemand=sameInitial?6.221436560950922*8.229100068035677e-9*72.08668*1e6/2:null;
    const fields=[['总流量（kg/s）',1.25e-5],['入口质量分数',0.090909],['供料时长（s）',water?1:2],['已验证理论需求（mg）',water?0.4612622645751668:1.846]].map(([name,v],i)=>{
      const f=el('input');f.type='number';f.min='0';f.step='any';if(i===1)f.max='1';
-     if(recorded)f.value=String(v);
+     if(i===3&&initialDemand!==null)f.value=String(initialDemand);
+     else if(recorded)f.value=String(v);
+     else if(i===0&&Number.isFinite(flow)&&flow>0)f.value=String(Number(flow.toPrecision(6)));
+     else if(i===1&&Number.isFinite(inlet))f.value=String(Number(inlet.toPrecision(6)));
      const l=el('label',name);l.append(f);notes.append(l);return f;
    });
    const fmt=(v,u)=>Number.isFinite(v)?v.toPrecision(4)+' '+u:'—';
    const pct=v=>Number.isFinite(v)?(100*v).toPrecision(3)+'%':'—';
+   const chart=el('div');chart.className='af-material-chart';
+   const details=el('details');details.append(el('summary','详细数值与来源'),table,notes);
+   card.append(chart,details);
+   function drawMaterial(total,d,extra,estimated){
+     chart.replaceChildren();
+     const items=[['累计投料'+(estimated?'（估算）':''),total,'feed'],['晶圆理论需求',d,'need'],['全腔气相余量',mass,'gas']];
+     const scale=Math.max(0,...items.map(([,v])=>Number.isFinite(v)?v:0));
+     if(!items.some(([,v])=>Number.isFinite(v)))return;
+     const plot=el('div');plot.className='material-bars';
+     for(const [label,v,kind] of items){
+       const track=el('div');track.className='material-track';track.dataset.kind=kind;
+       if(Number.isFinite(v)&&scale>0){const fill=el('i');fill.style.width=(100*v/scale)+'%';track.append(fill);}
+       plot.append(el('span',label),track,el('strong',Number.isFinite(v)?fmt(v,'mg'):'—'));
+     }
+     chart.append(plot);
+     if(Number.isFinite(extra))chart.append(el('p',(extra>=0?'理论投料余量 ':'低于理论需求 ')+fmt(Math.abs(extra),'mg')+(estimated?' · 按估算投料':'') ));
+     if(total>0&&mass!==null){
+       const ratio=mass/total;
+       const line=el('p');line.className='material-share';line.append(el('span','气相余量占'+(estimated?'估算':'')+'投料'),el('strong',pct(ratio)));
+       chart.append(line);
+       if(ratio>=0&&ratio<=1){const track=el('div');track.className='material-track share';const fill=el('i');fill.style.width=(ratio*100)+'%';track.append(fill);chart.append(track);}
+     }
+   }
    function update(){
      const [a,b,c,d]=fields.map(f=>f.value!==''&&f.validity.valid?Number(f.value):null);
-     const feed=[a,b,c].every(Number.isFinite)?a*b*c*1e6:null;
-     const extra=feed!==null&&d!==null?feed-d:null;
+     const feed=history?history[key]:[a,b,c].every(Number.isFinite)?a*b*c*1e6:null;
+     
+     const estimate=feed===null&&Number.isFinite(a)&&a>0&&Number.isFinite(b)&&b>0&&Number.isFinite(time(current))&&time(current)>0
+       ?a*b*time(current)*1e6:null;
+     const total=feed??estimate;
+     const estimated=feed===null&&estimate!==null;
+     const extra=total!==null&&d!==null?total-d:null;
+     const missing=[a===null?'入口流量':'',b===null?'入口组分':'',c===null?'供料时段':''].filter(Boolean).join('、');
      const rows=[
        ['指标','数值','时刻／来源'],
-       ['入口累计投料',fmt(feed,'mg'),feed===null?'缺供料流量、组分或时长':recorded?'工艺示例／补录':'本次补录'],
-       ['晶圆理论需求',fmt(d,'mg'),d===null?(water?'缺切水前表面积分':'缺初始位点与反应计量'):recorded?(water?'15.0 s 表面积分／补录':'理想最低剂量／补录'):'本次补录'],
-       ['理论投料余量',fmt(extra,'mg'),extra===null?'需投料和理论需求':'投料 − 理论需求'],
+       ['当前入口质量分数',pct(gas.inlet_mass_fractions?.[key]),frameTime+' · 入口统计'],
+       ['当前入口净流量',fmt(flow,'kg/s'),Number.isFinite(flow)?frameTime+' · 入口面通量':'缺入口面通量'],
+       ['入口累计投料',total===0?'0 mg':fmt(total,'mg'),estimated?'估算 · 假设 0–'+frameTime+' 恒定供料':history?(feed===0?'入口历史 · 尚未供入':'入口历史积分'):feed===null?'缺'+missing:recorded?'工艺示例／补录':'恒定供料／补录'],
+       ['晶圆理论需求',fmt(d,'mg'),d===null?(water?'缺切水前表面积分':'缺初始位点与反应计量'):recorded?(water?'15.0 s 表面积分／补录':'理想最低剂量／补录'):sameInitial&&d===initialDemand?'0 s OH 约 100% · 2 OH / TMA 理想口径':'本次补录'],
+       ['理论投料余量',fmt(extra,'mg'),extra===null?'需投料和理论需求':estimated?'按估算投料 − 理论需求':'投料 − 理论需求'],
        ['全腔气相残余',fmt(mass===null?null:mass*1000,'µg'),mass===null?'缺密度、组分场或有效体积':frameTime+' · 流场积分'],
-       ['残余占总投料',pct(mass!==null&&feed>0?mass/feed:null),feed>0?frameTime:'缺正的累计投料'],
-       ['残余占理论余量',pct(mass!==null&&extra>0?mass/extra:null),extra===null?'缺理论余量':extra<=0?'无正的理论投料余量':frameTime],
+       ['残余占总投料',pct(mass!==null&&total>0?mass/total:null),total>0?(estimated?'按估算投料':frameTime):total===0?'不适用 · 累计投料为零':'缺累计投料'],
+       ['残余占理论余量',pct(mass!==null&&extra>0?mass/extra:null),extra===null?'缺理论余量':extra<=0?'无正的理论投料余量':(estimated?'估算 · ':'')+(mass!==null&&mass>extra?'当前库存高于理论投料差额':frameTime)],
        ['体积平均质量分数',pct(stats?.volume_mean),stats?frameTime:'缺全腔体积统计'],
        ['最大质量分数',pct(stats?.max),stats?frameTime:'缺全腔峰值统计'],
        ['峰值坐标（X, Y, Z）',stats?.peak_xyz_m?.map(x=>(x*1000).toFixed(2)).join(', ')||'—',stats?'mm · 单元中心':'缺峰值坐标']
      ];
+     drawMaterial(total,d,extra,estimated);
      const body=el('tbody');rows.forEach((r,i)=>{const tr=el('tr');for(const v of r){const cell=el(i?'td':'th',v);if(!i)cell.scope='col';tr.append(cell);}body.append(tr);});
      table.tBodies[0]?.remove();table.append(body);
    }
    for(const f of fields)f.oninput=update;
-   update();card.append(table,notes);
+   refresh.push(update);update();
+   if(sameInitial)notes.append(el('p','初始证据：同算例 FFF-1-00000.dat.h5，0 s，OH 约 100%；反应面积监测 6.2214 m²；FFF.set 位点密度 8.2291×10⁻⁹ kmol/m²。按 2 OH / TMA 的理想口径计算。'));
    if(recorded&&!water)notes.append(el('p','15.0 s 第一次吹扫末端，TMA 残余 14.72 µg（工艺对照记录）。'));
    if(anchor)anchor.insertAdjacentElement('beforebegin',card);else host.append(card);
    if(anchor&&target===3&&recorded){

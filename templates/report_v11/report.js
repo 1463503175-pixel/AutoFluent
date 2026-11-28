@@ -44,13 +44,14 @@ function renderAtlas(){
 }
 function jump(id){const e=document.getElementById(id);if(e)window.scrollTo({top:scrollY+e.getBoundingClientRect().top-headerOffset(),left:0,behavior:'instant'});syncNavigation()}
 function setTabs(container,attr,val){document.querySelectorAll(`${container} [${attr}]`).forEach(b=>b.classList.toggle('active',b.dataset[attr.replace('data-','')]===String(val)))}
-const CHAPTERS=[['overview','研究对象与主要结论'],['flow','气体流路与分配'],['species','混合气体组分与暴露证据'],['wall-reaction','壁面反应与表面覆盖率'],['ald-stages','ALD 阶段对照'],['channels','晶圆通道均匀性'],['baffles','上下挡板怎样分配气体'],['pressure','气体向下流动，压力怎样变化'],['locator','低流量通道集中在哪里'],['actions','优化方向与验证计划'],['evidence','方法与完整数据']].filter(([id])=>document.getElementById(id));
+const CHAPTERS=[['overview','研究对象与主要结论'],['flow','气体流路与分配'],['species','混合气体组分与暴露证据'],['wall-reaction','壁面反应与表面覆盖率'],['ald-stages','ALD 阶段对照'],['channels','晶圆通道均匀性'],['baffles','上下挡板怎样分配气体'],['pressure','气体向下流动，压力怎样变化'],['locator','低流量通道集中在哪里'],['actions','优化方向与验证计划'],['evidence','计算方法与数据来源']].filter(([id])=>document.getElementById(id));
 function setup(){
  $('#modelName').textContent=D.name.replace(/\.cas\.h5$/i,'')+' · 流动与分配分析';$('#breadcrumbModel').textContent=D.name;
  document.title=D.name+' · AutoFluent 仿真分析报告';
  $('#dataScope').textContent=D.reportMetadata.synthetic_demo?'合成测试数据':'保存解原生统计';
  $('#researchBrief').textContent=D.analysis.plain_summary+' '+D.analysis.research;
- $('#nav').innerHTML=CHAPTERS.map(([id,title],i)=>'<a href="#'+id+'"><span>'+String(i+1).padStart(2,'0')+'</span>'+title+'</a>').join('');
+ const navLabels={"overview":"算例与结论","flow":"全腔流路","species":"气相组分","wall-reaction":"晶圆反应与用料","ald-stages":"ALD 阶段","channels":"片间流量","baffles":"挡板孔径与流量","pressure":"压力与压降","locator":"低流量通道","actions":"优化与验证","evidence":"方法与数据"};
+ $('#nav').innerHTML=CHAPTERS.map(([id,title],i)=>'<a href="#'+id+'"><span>'+String(i+1).padStart(2,'0')+'</span>'+(navLabels[id]||title)+'</a>').join('');
  CHAPTERS.forEach(([id,title],i)=>{const e=$('#'+id+' > .chapter-heading');if(!e?.querySelector('.serial')||!e.querySelector('h2'))return;e.querySelector('.serial').textContent=String(i+1).padStart(2,'0');e.querySelector('h2').textContent=title;});
  $('#holeCount').textContent=HO.length+'个孔，'+BD.length+'排；蓝色较低，橙色较高。';
  $('#holeRows').innerHTML='<button data-row="0" class="active">全部孔排</button>'+BD.map(r=>'<button data-row="'+r.row+'">第'+r.row+'排</button>').join('');
@@ -138,7 +139,7 @@ function holeColor(r){const dv=r-100;if(palette==='threshold')return r<90?'#234f
 function closeHole(){selectedHole=null;renderHoleDetail();$$('.hole-dot').forEach(x=>x.classList.remove('active'))}
 function renderHoleDetail(){const el=$('#holeDetail');if(!selectedHole){el.className='selection';el.textContent='点选孔位，查看其编号、真实坐标、净流量与相对整板逐孔平均值。再次点击可关闭。';return}
  const h=HO.find(z=>z.id===selectedHole);if(!h){closeHole();return}const row=h.row;
- el.className='selection selected';el.innerHTML=`<b>孔 #${h.id} · 第 ${row||'?'} 排</b><button type="button" id="closeHole">关闭 ×</button><br>坐标 X = ${nm(h.x,2)} mm，Z = ${nm(h.z,2)} mm；净质量流量 <b>${e3(h.net)} kg/s</b><br>相对整板平均：<b>${pct(getRatio(h))}</b>（${getRatio(h)<100?'低':'高'} ${pct(Math.abs(getRatio(h)-100))}）。正向 ${e3(h.fwd)} kg/s，反向幅值 ${e3(h.back)} kg/s。`;
+ el.className='selection selected';el.innerHTML=`<b>孔 #${h.id} · 第 ${row||'?'} 排</b><button type="button" id="closeHole">关闭 ×</button><br>坐标 X = ${nm(h.x,2)} mm，Z = ${nm(h.z,2)} mm；净质量流量 <b>${e3(h.net)} kg/s</b><br>网格开口尺寸 ${Number.isFinite(h.width_x_mm)&&Number.isFinite(h.width_z_mm)?nm(h.width_x_mm,2)+' × '+nm(h.width_z_mm,2)+' mm（X × Z）':'未取得'}<br>相对整板平均：<b>${pct(getRatio(h))}</b>（${getRatio(h)<100?'低':'高'} ${pct(Math.abs(getRatio(h)-100))}）。正向 ${e3(h.fwd)} kg/s，反向幅值 ${e3(h.back)} kg/s。`;
  $('#closeHole').onclick=closeHole;
 }
 function selectHole(id){if(selectedHole===id){closeHole();return}selectedHole=id;renderHoleDetail();$$('.hole-dot').forEach(x=>x.classList.toggle('active',Number(x.dataset.id)===id))}
@@ -157,19 +158,93 @@ function setBaffle(board){
  $$('#holeRows button').forEach(e=>e.onclick=()=>{holeRow=Number(e.dataset.row);closeHole();renderBaffles()});
  renderBaffles();renderBaffleRows();threeFacts('#baffleExplainer',D.analysis.boards[board]);
 }
+const highlightedDiameters=new Set(['6.0','7.0','8.0','8.5','9.0','9.5']);
+const diameterRamp=['#f4f4f4','#d9d9d9','#bdbdbd','#9b9b9b','#777777','#525252'];
+
 function renderBaffles(){
  if(!HO.length){$('#baffleStats').textContent='此挡板的逐孔统计尚未取得。';$('#holeSvg').innerHTML='';$('#holeLegend').innerHTML='';$('#holeRowTable').innerHTML='';$('#baffleInsight').textContent='';return;}
  $('#baffleStats').innerHTML=metric('最弱孔 / 整板平均',pct(getRatio(hMin)),`孔 #${hMin.id}`,'danger')+metric('最强孔 / 整板平均',pct(getRatio(hMax)),`孔 #${hMax.id}`)+metric('逐孔均值',e3(holeAvg)+' kg/s',`${HO.length} 个候选孔`);
  const xmin=Math.min(...HO.map(x=>x.x)),xmax=Math.max(...HO.map(x=>x.x)),zmin=Math.min(...HO.map(x=>x.z)),zmax=Math.max(...HO.map(x=>x.z));
  const xpix=x=>79+(x-xmin)/(xmax-xmin||1)*790,ypix=z=>36+(z-zmin)/(zmax-zmin||1)*225;
+ const scale=Math.min(790/(xmax-xmin||1),225/(zmax-zmin||1));
+ const measured=h=>Number.isFinite(h.width_x_mm)&&h.width_x_mm>0&&Number.isFinite(h.width_z_mm)&&h.width_z_mm>0;
+ const measuredCount=HO.filter(measured).length;
+ $('#holeCount').textContent+=' '+(measuredCount?'孔形按网格开口的 X/Z 尺寸等比例绘制。':'孔径未取得，点位为示意。')+(measuredCount>0&&measuredCount<HO.length?' 虚线孔位无尺寸。':'');
  let svg=`<rect x="50" y="21" width="829" height="255" fill="#fbfdfd" stroke="#dfe8eb" rx="8"/>`;
- for(let b of BD){let y=ypix(b.z);svg+=`<line x1="60" x2="880" y1="${y}" y2="${y}" stroke="#edf2f3" stroke-dasharray="3 5"/><text x="13" y="${y+4}" fill="#405e6b" font-size="13" font-weight="700">排${b.row}</text>`}
- for(let h of HO){const r=getRatio(h),row=h.row;const show=applyHoleFilter(h)&&(holeRow===0||holeRow===row);svg+=`<circle class="hole-dot chart-target ${h.id===hMin.id?'minhole':''} ${h.id===hMax.id?'maxhole':''} ${!show?'faded':''}" data-id="${h.id}" ${!show?'style="pointer-events:none"':''} r="${h.id===hMin.id||h.id===hMax.id?7.3:6.15}" cx="${xpix(h.x).toFixed(2)}" cy="${ypix(h.z).toFixed(2)}" fill="${holeColor(r)}" stroke="#fff" stroke-width="1" ${show?'tabindex="0"':'tabindex="-1"'} role="button" aria-label="孔${h.id} ${pct(r)}"/>`}
- svg+=`<text x="60" y="301" font-size="12" fill="#657f89">X = ${nm(xmin,0)} mm</text><text x="880" y="301" font-size="12" fill="#657f89" text-anchor="end">X = ${nm(xmax,0)} mm</text>`;
+ const diameterColors=Object.fromEntries(['6.0','7.0','8.0','8.5','9.0','9.5'].map((v,i)=>[v,diameterRamp[i]]));
+ const groups=new Map();
+ for(const h of HO){
+   if(holeRow&&h.row!==holeRow)continue;
+   const x=h.x.toFixed(2);
+   if(!groups.has(x))groups.set(x,new Set());
+   groups.get(x).add(measured(h)&&h.width_x_mm.toFixed(1)===h.width_z_mm.toFixed(1)?h.width_x_mm.toFixed(1):'');
+ }
+ const columns=[...new Set(HO.map(h=>h.x.toFixed(2)))].map(Number).sort((a,b)=>a-b);
+ const used=new Set();
+ const bands=[];
+ columns.forEach((x,i)=>{
+   const sizes=groups.get(x.toFixed(2));
+   const diameter=sizes?.size===1?[...sizes][0]:'';
+   const fill=diameterColors[diameter];
+   if(!fill)return;
+   used.add(diameter);
+   if(!highlightedDiameters.has(diameter))return;
+   const center=xpix(x);
+   const left=i?(xpix(columns[i-1])+center)/2:51;
+   const right=i+1<columns.length?(xpix(columns[i+1])+center)/2:878;
+   const last=bands.at(-1);
+   if(last?.diameter===diameter&&Math.abs(last.right-left)<.001)last.right=right;
+   else bands.push({left,right,diameter,fill});
+ });
+ for(const {left,right,fill} of bands)
+   svg+=`<rect x="${left}" y="22" width="${right-left+.4}" height="253" fill="${fill}" pointer-events="none"/>`;
+ for(let b of BD){let y=ypix(b.z);if(!highlightedDiameters.size)svg+=`<line x1="60" x2="880" y1="${y}" y2="${y}" stroke="#edf2f3" stroke-dasharray="3 5"/>`;svg+=`<text x="13" y="${y+4}" fill="#405e6b" font-size="13" font-weight="700">排${b.row}</text>`}
+ for(let h of HO){const r=getRatio(h),row=h.row;const show=applyHoleFilter(h)&&(holeRow===0||holeRow===row);svg+=`<ellipse class="hole-dot chart-target ${h.id===hMin.id?'minhole':''} ${h.id===hMax.id?'maxhole':''} ${!show?'faded':''}" data-id="${h.id}" ${!show?'style="pointer-events:none"':''} rx="${measured(h)?h.width_x_mm*scale/2:3}" ry="${measured(h)?h.width_z_mm*scale/2:3}" ${measured(h)?'':'stroke-dasharray="2 2"'} cx="${xpix(h.x).toFixed(2)}" cy="${ypix(h.z).toFixed(2)}" fill="${holeColor(r)}" stroke="#fff" stroke-width="1" ${show?'tabindex="0"':'tabindex="-1"'} role="button" aria-label="孔${h.id} ${pct(r)}"/>`}
+ const diameterColumns=new Map();
+ for(const h of HO){
+   if(holeRow!==0&&h.row!==holeRow)continue;
+   const column=h.x.toFixed(2);
+   if(!diameterColumns.has(column))diameterColumns.set(column,new Set());
+   const sizes=diameterColumns.get(column);
+   if(!measured(h)){sizes.add('—');continue;}
+   const dx=h.width_x_mm.toFixed(1),dz=h.width_z_mm.toFixed(1);
+   sizes.add(dx===dz?dx:dx+'×'+dz);
+ }
+ svg+=`<text x="4" y="291" font-size="9.5" fill="#405e6b">孔径 mm</text>`;
+ for(const [x,sizes] of diameterColumns){
+   const label=sizes.size===1?[...sizes][0]:'混合';
+   const size=label.length>4?6.2:8.3;
+   svg+=`<text x="${xpix(Number(x)).toFixed(2)}" y="291" text-anchor="middle" font-size="${size}" fill="#405e6b"><title>${[...sizes].join(' / ')} mm</title>${label}</text>`;
+ }
+ svg+=`<text x="60" y="312" font-size="12" fill="#657f89">X = ${nm(xmin,0)} mm</text><text x="880" y="312" font-size="12" fill="#657f89" text-anchor="end">X = ${nm(xmax,0)} mm</text>`;
  $('#holeSvg').innerHTML=svg;
  $$('#holeSvg .hole-dot').forEach(c=>{c.onclick=()=>selectHole(Number(c.dataset.id));c.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();c.click()}}});
  $('#holeLegend').innerHTML=`<span class="legend-item"><i class="swatch" style="background:#24589a"></i>低 ${pct(getRatio(hMin),1)}</span><span class="legend-item"><i class="swatch" style="background:#bcc9c8"></i>平均 100%</span><span class="legend-item"><i class="swatch" style="background:#c75230"></i>高 ${pct(getRatio(hMax),1)}</span><span class="helper">${palette==='enhanced'?'当前为基于本模型极值的连续增强色阶':'当前固定阈值：<90、90–95、95–105、105–110、>110%'}</span>`;
  $$('#holeFilters button').forEach(b=>b.classList.toggle('active',b.dataset.filter===holeFilter));$$('#holeRows button').forEach(b=>b.classList.toggle('active',Number(b.dataset.row)===holeRow));
+ const sizes=[...used].sort((a,b)=>Number(a)-Number(b));
+ if(sizes.length){
+   const controls=document.createElement('div');
+   controls.style.cssText='flex-basis:100%;display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px';
+   const label=document.createElement('span');label.className='helper';label.textContent='高亮孔径（mm）';
+   controls.append(label);
+
+
+   for(const size of sizes){
+     const button=document.createElement('button');
+     button.type='button';button.className='btn';button.textContent=size;button.dataset.diameter=size;
+     const selected=highlightedDiameters.has(size);
+     button.setAttribute('aria-pressed',String(selected));
+     button.style.cssText='padding:4px 9px;'+(selected?'background:'+diameterColors[size]+';border-color:#797979;color:'+(Number(size)>=9?'#fff':'#202020')+';font-weight:700':'');
+     button.onclick=()=>{if(selected)highlightedDiameters.delete(size);else highlightedDiameters.add(size);renderBaffles();$('#holeLegend [data-diameter="'+size+'"]')?.focus();};
+     controls.append(button);
+   }
+   const clear=document.createElement('button');clear.type='button';clear.className='btn';clear.textContent='清除';clear.disabled=highlightedDiameters.size===0;
+   clear.style.padding='4px 9px';clear.onclick=()=>{highlightedDiameters.clear();renderBaffles();$('#holeLegend [data-diameter]')?.focus();};
+   const all=document.createElement('button');all.type='button';all.className='btn';all.textContent='全选';
+   all.disabled=sizes.every(size=>highlightedDiameters.has(size));all.style.padding='4px 9px';
+   all.onclick=()=>{sizes.forEach(size=>highlightedDiameters.add(size));renderBaffles();$('#holeLegend [data-diameter]')?.focus();};
+   controls.append(clear,all);$('#holeLegend').append(controls);
+ }
  renderHoleDetail();if(selectedHole){$$('.hole-dot').forEach(x=>x.classList.toggle('active',Number(x.dataset.id)===selectedHole))}
 }
 function renderBaffleRows(){if(!BD.length){$("#baffleInsight").textContent="孔排数据未取得。";return;}let tot=BD.reduce((s,x)=>s+x.mass,0)||1;
