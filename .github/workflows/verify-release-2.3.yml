@@ -1,0 +1,62 @@
+name: Verify AutoFluent 2.3 static resources
+on:
+  push:
+    paths:
+      - '.github/workflows/verify-release-2.3.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: autofluent-verify-23
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify published source hashes
+        run: sha256sum -c SHA256SUMS.txt
+      - name: Check Python and JavaScript syntax
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          paths=sorted(Path('worker').glob('*.py'))
+          for path in paths:
+              ast.parse(path.read_text(encoding='utf-8-sig'),filename=str(path))
+          print(f'Python AST: {len(paths)} files')
+          PY
+          find worker templates -name '*.js' -type f -print0 | xargs -0 -r -n 1 node --check
+      - name: Validate single-source release inventory and main README
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, re
+          from pathlib import Path
+          inv=json.loads(Path('docs/release_inventory.json').read_text())
+          assert inv['release']=='2.3' and len(inv['recovered'])==60
+          for r in inv['recovered']:
+              p=Path(r['path'])
+              assert p.is_file() and p.stat().st_size==r['size']
+              assert hashlib.sha256(p.read_bytes()).hexdigest()==r['sha256']
+          readme=Path('README.md').read_text()
+          assert '/releases/download/2.3/AutoFluent.exe' in readme
+          assert 'What’s new in 2.3' in readme
+          assert 'What’s new in 2.1' not in readme
+          for a,b in re.findall(r'(?:href|src)="([^"]+)"|\]\(([^)]+)\)', readme):
+              s=a or b
+              if not s.startswith(('http://','https://','#')):
+                  assert Path(s).exists(),s
+          assert hashlib.sha256(Path('app/AutoFluent.exe').read_bytes()).hexdigest()==inv['sha256']
+          print('Release inventory, README links and EXE digest: OK')
+          PY
+      - name: Remove temporary verification workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/verify-release-2.3.yml
+          git commit -m "chore: complete AutoFluent 2.3 release verification"
+          git push origin HEAD:main
